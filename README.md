@@ -38,6 +38,8 @@ npm run check
 
 ## 每日内容更新
 
+统一策略见 [采集规则](docs/采集规则.md)，运行时真源为 `lib/collection-policy.ts`，通过 `/api/update-guide` 输出。Moonvy 用于设计灵感与产品发现；GitHub 增加 AI 创作产品与解决实际问题的完整方案，按产品价值、维护、使用门槛和证据筛选。
+
 既有 Sites 云任务继续于北京时间每天 08:30 研究公开来源，避免创建重复采集：
 
 1. 云任务读取原站 `/api/update-guide`，写入产品库和当天完整简报。
