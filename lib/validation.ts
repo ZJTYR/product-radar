@@ -27,6 +27,12 @@ export function isSameOriginMutation(request: Request) {
  const site = request.headers.get('sec-fetch-site');
  if (site === 'cross-site') return false;
  const origin = request.headers.get('origin');
- if (!origin) return true; // Service callers have no browser Origin; Sites authenticates them at its private gate.
- try { return new URL(origin).origin === new URL(request.url).origin; } catch { return false; }
+ if (!origin) return true; // Service callers are authenticated by Vercel's private deployment gate.
+ try {
+  const supplied = new URL(origin);
+  const expected = new URL(request.url);
+  // Next may normalize the server URL to localhost. Host retains the actual browser destination.
+  const host = request.headers.get('host');
+  return supplied.origin === expected.origin || Boolean(host && supplied.host === host && supplied.protocol === expected.protocol);
+ } catch { return false; }
 }

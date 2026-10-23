@@ -7,6 +7,8 @@ test('reject cross-origin browser writes, permit same-origin and private-gated s
  assert.equal(isSameOriginMutation(new Request('https://radar.example/api/ingest', {headers:{origin:'https://radar.example'}})), true);
  assert.equal(isSameOriginMutation(new Request('https://radar.example/api/ingest', {headers:{'sec-fetch-site':'cross-site'}})), false);
  assert.equal(isSameOriginMutation(new Request('https://radar.example/api/ingest')), true);
+ assert.equal(isSameOriginMutation(new Request('http://localhost:5187/api/favorites', {headers:{host:'127.0.0.1:5187',origin:'http://127.0.0.1:5187'}})), true);
+ assert.equal(isSameOriginMutation(new Request('http://localhost:5187/api/favorites', {headers:{host:'127.0.0.1:5187',origin:'https://evil.example'}})), false);
 });
 test('editorial ingest accepts honest empty editions and validates calendar dates and limits', () => {
  assert.deepEqual(ingestSchema.parse({date:'2026-10-22',items:[]}), {date:'2026-10-22',items:[],status:'complete'});
