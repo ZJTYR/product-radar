@@ -56,6 +56,8 @@ npm run check
 
 根目录是标准 Next.js 应用。GitHub Actions 对提交和 PR 运行类型检查、测试、构建与 lint；Vercel 原生 Git 集成订阅本仓库，main 的新提交自动产生生产部署并更新固定地址。
 
+`npm run build` 会先清理本项目 `.next` 生成目录，再重新编译并检查实际 CSS 产物中的 AI 前沿、产品发现和简报阅读布局。请先停止本项目的开发或预览服务器再运行构建。部署后还需从正式首页读取它实际引用的样式文件，下载到仓库外并执行 `node scripts/verify-styles.mjs /absolute/path/deployed.css`；构建通过不能替代线上样式核验。
+
 完成改动后，按 AGENTS.md 核验 ZJTYR 身份、推送功能分支、等待 CI、正常合并 PR 并检查 Vercel 对应提交。CI 与 Vercel 构建是独立状态，必须分别核验，不能只凭 push 成功声称已上线。
 
 ## 每日内容更新
