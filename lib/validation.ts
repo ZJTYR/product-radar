@@ -22,6 +22,10 @@ export const ingestSchema = z.object({ date: dateSchema, items: z.array(itemSche
 });
 export const favoriteSchema = z.object({ itemId: z.string().min(1).max(100), collection: z.string().trim().min(1).max(80), note: z.string().max(4000) }).strict();
 export const preferenceSchema = z.object({ email: z.string().trim().email().max(254), deliveryTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), emailEnabled: z.boolean() }).strict();
+export const feedbackItemIdSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
+export const feedbackSchema = z.object({ itemId: feedbackItemIdSchema, action: z.enum(['interested', 'not_interested']) }).strict();
+export const undoSchema = z.object({ undoToken: z.string().uuid() }).strict();
+export const recommendationLimitSchema = z.coerce.number().int().min(1).max(30).default(12);
 export const systemSchema = z.object({ schedule_status: z.string().max(400).optional(), schedule_id: z.string().max(200).optional(), schedule_updated_at: timestamp.optional() }).strict();
 export function isSameOriginMutation(request: Request) {
  const site = request.headers.get('sec-fetch-site');

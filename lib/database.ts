@@ -10,6 +10,10 @@ const schema = [
  'CREATE TABLE IF NOT EXISTS preferences (user_id TEXT PRIMARY KEY,email TEXT NOT NULL,delivery_time TEXT NOT NULL,email_enabled INTEGER NOT NULL DEFAULT 0)',
  'CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY,kind TEXT NOT NULL,status TEXT NOT NULL,detail TEXT NOT NULL,created_at TEXT NOT NULL)',
  'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL)',
+ 'CREATE TABLE IF NOT EXISTS reading_state (user_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0 CONSTRAINT reading_revision_nonnegative CHECK(revision>=0))',
+ "CREATE TABLE IF NOT EXISTS reading_feedback (user_id TEXT NOT NULL,item_id TEXT NOT NULL,action TEXT NOT NULL CHECK(action IN ('interested','not_interested')),updated_at TEXT NOT NULL,version TEXT NOT NULL,PRIMARY KEY(user_id,item_id))",
+ 'CREATE TABLE IF NOT EXISTS reading_undo (token TEXT PRIMARY KEY,user_id TEXT NOT NULL,item_id TEXT NOT NULL,before_payload TEXT,after_version TEXT NOT NULL,auto_favorite_version TEXT,created_at TEXT NOT NULL)',
+ 'CREATE TABLE IF NOT EXISTS reading_favorite_versions (user_id TEXT NOT NULL,item_id TEXT NOT NULL,version TEXT NOT NULL,PRIMARY KEY(user_id,item_id))',
 ];
 type Value = string | number | null;
 type Row = Record<string, unknown>;
@@ -63,4 +67,4 @@ export class RadarDatabase {
  close() { this.local?.close(); }
 }
 let db: RadarDatabase | undefined;
-export function getDatabase() { return db ??= new RadarDatabase(process.env.DATABASE_URL); }
+export function getDatabase() { return db ??= new RadarDatabase(process.env.DATABASE_URL, process.env.RADAR_LOCAL_DB_PATH || '.local/radar.sqlite'); }

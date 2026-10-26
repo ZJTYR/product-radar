@@ -13,6 +13,8 @@ export interface IntelItem {
 }
 export interface SavedItem { itemId: string; collection: string; note: string; createdAt: string; updatedAt: string }
 export interface Preferences { email: string; deliveryTime: string; emailEnabled: boolean }
+export type InterestAction = 'interested' | 'not_interested';
+export interface ItemFeedback { itemId: string; action: InterestAction; updatedAt: string }
 export interface FeedResponse {
  items: IntelItem[];
  meta: { updatedAt: string; date: string; total: number; scheduleStatus: string; emailStatus: string; sourceCount: number; lastRunStatus: string; lastError?: string; editionItemIds?: string[]; emailConfigured?: boolean; };
