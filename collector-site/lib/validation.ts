@@ -4,7 +4,7 @@ export const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v => !N
 const timestamp = z.string().max(40).refine(v => !Number.isNaN(Date.parse(v)), '时间格式无效');
 export const httpUrl = z.string().url().max(2000).refine(v => ['http:', 'https:'].includes(new URL(v).protocol), '仅支持 http(s) 来源');
 export const itemSchema = z.object({
- id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), kind: z.enum(['product', 'design', 'ai']), name: text, title: text, subtitle: text,
+ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), kind: z.enum(['product', 'design', 'ai']), aiApplication: z.enum(['agents','knowledge','multimodal','integration','engineering']).optional(), name: text, title: text, subtitle: text,
  summary: text, category: text, tags: z.array(z.string().max(80)).max(30), image: z.string().max(2000).refine(v => /^\/images\/[A-Za-z0-9_.\/-]+$/.test(v) && !v.includes('..') || httpUrl.safeParse(v).success, '图片仅允许 /images/ 路径或 http(s) URL').optional(),
  imageCaption: z.string().trim().min(1).max(300).optional(), scenario: text.optional(),
  accent: z.string().regex(/^#(?:[a-fA-F0-9]{3}|[a-fA-F0-9]{6}|[a-fA-F0-9]{8})$/), website: httpUrl, github: httpUrl.optional(), repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional(),

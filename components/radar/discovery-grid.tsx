@@ -1,0 +1,168 @@
+"use client";
+
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { ArrowUpRight, Bookmark, Check, Compass, EyeOff, Loader2, RotateCcw, Star } from "lucide-react";
+import type { IntelItem } from "@/lib/types";
+import type { InterestAction, RecommendationResult } from "./interest";
+
+export interface DiscoveryGridHandle { undo: (token: string) => void; reload: () => void; replaceDismissed: (itemId: string, token: string | null) => Promise<void> }
+interface UndoSlot { token: string; index: number; item: IntelItem; replacement: IntelItem | null; changed: boolean }
+interface Props {
+  excludedId?: string;
+  blockedIds: Set<string>;
+  savedIds: Set<string>;
+  disabled: boolean;
+  ready: boolean;
+  onOpen: (item: IntelItem) => void;
+  onFeedback: (item: IntelItem, action: InterestAction) => Promise<boolean>;
+  getUndoToken: () => string | null;
+  onUndo: () => Promise<void>;
+  renderVisual: (item: IntelItem) => ReactNode;
+  onLibrary: () => void;
+}
+
+const SIZE = 8;
+const stars = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+
+export const DiscoveryGrid = forwardRef<DiscoveryGridHandle, Props>(function DiscoveryGrid({ excludedId, blockedIds, savedIds, disabled, ready, onOpen, onFeedback, getUndoToken, onUndo, renderVisual, onLibrary }, ref) {
+  const [scope, setScope] = useState<"products" | "github">("products");
+  const [slots, setSlots] = useState<(IntelItem | null)[]>(Array(SIZE).fill(null));
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [changing, setChanging] = useState<number | null>(null);
+  const [undoAvailable, setUndoAvailable] = useState(false);
+  const slotsRef = useRef(slots);
+  const queueRef = useRef<IntelItem[]>([]);
+  const blockedRef = useRef(blockedIds);
+  const savedRef = useRef(savedIds);
+  const excludedRef = useRef(excludedId);
+  const seenRef = useRef(new Set<string>());
+  const generationRef = useRef(0);
+  const requestRef = useRef<Promise<IntelItem[]> | null>(null);
+  const mountedRef = useRef(true);
+  const initializedRef = useRef(false);
+  const activeScopeRef = useRef(scope);
+  const undoRef = useRef<UndoSlot | null>(null);
+  blockedRef.current = blockedIds; savedRef.current = savedIds; excludedRef.current = excludedId;
+
+  const updateSlots = useCallback((next: (IntelItem | null)[]) => { slotsRef.current = next; setSlots(next); }, []);
+  const eligible = useCallback((item: IntelItem) => item.id !== excludedRef.current && !blockedRef.current.has(item.id) && !savedRef.current.has(item.id) && !seenRef.current.has(item.id), []);
+
+  const fetchCandidates = useCallback(async () => {
+    if (requestRef.current) return requestRef.current;
+    const generation = generationRef.current;
+    const exclude = [...new Set([...slotsRef.current.flatMap(item => item ? [item.id] : []), ...(excludedRef.current ? [excludedRef.current] : [])])];
+    const promise = (async () => {
+      const params = new URLSearchParams({ scope, limit: "24", exclude: exclude.join(",") });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20_000);
+      try {
+        const response = await fetch(`/api/recommendations?${params}`, { cache: "no-store", signal: controller.signal });
+        const data = await response.json() as RecommendationResult & { error?: string };
+        if (!response.ok) throw new Error(data.error || "候选内容暂时无法读取");
+        if (!mountedRef.current || generation !== generationRef.current) return [];
+        const ids = new Set(queueRef.current.map(item => item.id));
+        const candidates = data.items.filter(item => eligible(item) && !ids.has(item.id));
+        queueRef.current = [...queueRef.current.filter(eligible), ...candidates];
+        setError("");
+        return queueRef.current;
+      } catch (err) {
+        if (mountedRef.current && generation === generationRef.current) setError(err instanceof Error && err.name !== "AbortError" ? err.message : "读取超时，请重试补齐");
+        return [];
+      } finally { clearTimeout(timer); if (generation === generationRef.current) requestRef.current = null; }
+    })();
+    requestRef.current = promise;
+    return promise;
+  }, [eligible, scope]);
+
+  const takeCandidate = useCallback(() => {
+    queueRef.current = queueRef.current.filter(eligible);
+    const next = queueRef.current.shift() || null;
+    if (next) seenRef.current.add(next.id);
+    return next;
+  }, [eligible]);
+
+  const startBatch = useCallback(async () => {
+    ++generationRef.current; requestRef.current = null; queueRef.current = []; seenRef.current = new Set(); undoRef.current = null;
+    updateSlots(Array(SIZE).fill(null)); setUndoAvailable(false); setChanging(null); setLoading(true); setError("");
+    const generation = generationRef.current;
+    await fetchCandidates();
+    if (!mountedRef.current || generation !== generationRef.current) return;
+    updateSlots(Array.from({ length: SIZE }, () => takeCandidate())); setLoading(false);
+  }, [fetchCandidates, takeCandidate, updateSlots]);
+
+  const invalidate = useCallback(() => { ++generationRef.current; requestRef.current = null; initializedRef.current = false; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; invalidate(); };
+  }, [invalidate]);
+  useEffect(() => {
+    if (!ready || initializedRef.current && activeScopeRef.current === scope) return;
+    let active = true;
+    void Promise.resolve().then(() => { if (active) { initializedRef.current = true; activeScopeRef.current = scope; void startBatch(); } });
+    return () => { active = false; };
+  }, [ready, scope, startBatch]);
+
+  useImperativeHandle(ref, () => ({
+    reload: () => { if (!disabled) void startBatch(); },
+    replaceDismissed: async (itemId: string, token: string | null) => {
+      const index = slotsRef.current.findIndex(item => item?.id === itemId);
+      const item = slotsRef.current[index];
+      if (index < 0 || !item) return;
+      const generation = generationRef.current;
+      setChanging(index);
+      let replacement = takeCandidate();
+      if (!replacement) { await fetchCandidates(); replacement = takeCandidate(); }
+      if (!mountedRef.current || generation !== generationRef.current) return;
+      const next = [...slotsRef.current]; next[index] = replacement; updateSlots(next);
+      undoRef.current = token ? { token, index, item, replacement, changed: true } : null;
+      setUndoAvailable(Boolean(token)); setChanging(null);
+    },
+    undo: (token: string) => {
+      const previous = undoRef.current;
+      if (!previous || previous.token !== token) return;
+      if (previous.changed) {
+        if (previous.replacement) { seenRef.current.delete(previous.replacement.id); queueRef.current.unshift(previous.replacement); }
+        const next = [...slotsRef.current]; next[previous.index] = previous.item; updateSlots(next);
+      }
+      undoRef.current = null; setUndoAvailable(false);
+    },
+  }), [disabled, fetchCandidates, startBatch, takeCandidate, updateSlots]);
+
+  async function choose(index: number, action: InterestAction) {
+    const item = slotsRef.current[index];
+    if (!item || disabled || changing !== null) return;
+    const generation = generationRef.current;
+    setChanging(index);
+    const done = await onFeedback(item, action);
+    if (!mountedRef.current || generation !== generationRef.current) return;
+    if (!done) { setChanging(null); setError("选择结果已重新核对，请重试；当前卡片暂时保留。"); return; }
+    let replacement: IntelItem | null = null;
+    if (action === "not_interested") {
+      replacement = takeCandidate();
+      if (!replacement && !error) { await fetchCandidates(); replacement = takeCandidate(); }
+      if (!mountedRef.current || generation !== generationRef.current) return;
+      const next = [...slotsRef.current]; next[index] = replacement; updateSlots(next);
+    }
+    const token = getUndoToken();
+    undoRef.current = token ? { token, index, item, replacement, changed: action === "not_interested" } : null;
+    setUndoAvailable(Boolean(token)); setChanging(null);
+    if (queueRef.current.filter(eligible).length < SIZE) void fetchCandidates();
+  }
+
+  async function refillEmpty() {
+    if (disabled || changing !== null) return;
+    const generation = generationRef.current;
+    setLoading(true); await fetchCandidates();
+    if (!mountedRef.current || generation !== generationRef.current) return;
+    updateSlots(slotsRef.current.map(item => item || takeCandidate())); setLoading(false);
+  }
+
+  return <section className="content-section product-discovery" aria-label="产品发现"><div className="section-heading"><div><span className="section-mark"><Compass size={16} /></span><h2>产品发现</h2><span className="section-description">跨行业好产品 · 根据你的选择继续发现</span></div><button className="text-link" onClick={onLibrary}>查看全部资料 <ArrowUpRight size={14} /></button></div>
+    <div className="discovery-grid-toolbar"><div className="discovery-grid-tabs" aria-label="产品发现筛选"><button className={scope === "products" ? "selected" : ""} disabled={disabled || changing !== null} aria-pressed={scope === "products"} onClick={() => setScope("products")}>综合推荐</button><button className={scope === "github" ? "selected" : ""} disabled={disabled || changing !== null} aria-pressed={scope === "github"} onClick={() => setScope("github")}><Star size={12} />GitHub 高关注</button></div><div>{undoAvailable && <button className="text-link" disabled={disabled || changing !== null || !getUndoToken() || getUndoToken() !== undoRef.current?.token} onClick={() => void onUndo()}><RotateCcw size={13} />撤销上次选择</button>}<span>{loading ? "正在准备候选" : `${slots.filter(Boolean).length} 条展示 · ${queueRef.current.length} 条已准备`}</span></div></div>
+    <p className="section-context">打开详情后记为已看，下次不重复推荐；不感兴趣会在原位置换一条。</p>
+    {error && <div className="inline-warning discovery-grid-warning" role="alert"><span>{error}</span><button disabled={disabled || loading} onClick={() => void refillEmpty()}>重新核对并补齐</button></div>}
+    <div className="product-grid discovery-product-grid">{slots.map((item, index) => <div className="discovery-grid-slot" key={index} data-slot={index}>{item ? <article className={`product-card discovery-product-card ${changing === index ? "is-changing" : ""}`} data-item-id={item.id}><button className="card-open" onClick={() => onOpen(item)}>{renderVisual(item)}<div className="product-card-body"><div className="card-kicker"><span>{item.category}</span>{item.stars != null && <span className="star-count"><Star size={12} />{stars(item.stars)}</span>}</div><h3>{item.name}<ArrowUpRight size={15} /></h3><p>{item.title}</p><div className="card-tags">{item.tags.slice(0, 2).map(tag => <span key={tag}>{tag}</span>)}<span className="read-time">{item.readMinutes} 分钟</span></div></div></button><div className="grid-card-actions"><button className={`grid-interest ${savedIds.has(item.id) ? "is-saved" : ""}`} disabled={disabled || changing !== null || savedIds.has(item.id)} onClick={() => void choose(index, "interested")}>{savedIds.has(item.id) ? <Check size={14} /> : <Bookmark size={14} />}{savedIds.has(item.id) ? "已收藏" : "感兴趣并收藏"}</button><button className="grid-dismiss" disabled={disabled || changing !== null} onClick={() => void choose(index, "not_interested")}>{changing === index ? <Loader2 size={14} className="spin" /> : <EyeOff size={14} />}不感兴趣</button></div></article> : <div className={`grid-slot-empty ${loading ? "is-loading" : ""}`} role="status">{loading ? <><Loader2 size={22} className="spin" /><strong>正在准备下一条</strong></> : <><Compass size={25} /><strong>暂时没有新的候选</strong><p>已看和已处理的内容不会重复填入。每日采集更新后继续补充。</p><button className="text-link" onClick={onLibrary}>去资料库回看 <ArrowUpRight size={13} /></button></>}</div>}</div>)}</div>
+  </section>;
+});

@@ -14,6 +14,8 @@ const schema = [
  "CREATE TABLE IF NOT EXISTS reading_feedback (user_id TEXT NOT NULL,item_id TEXT NOT NULL,action TEXT NOT NULL CHECK(action IN ('interested','not_interested')),updated_at TEXT NOT NULL,version TEXT NOT NULL,PRIMARY KEY(user_id,item_id))",
  'CREATE TABLE IF NOT EXISTS reading_undo (token TEXT PRIMARY KEY,user_id TEXT NOT NULL,item_id TEXT NOT NULL,before_payload TEXT,after_version TEXT NOT NULL,auto_favorite_version TEXT,created_at TEXT NOT NULL)',
  'CREATE TABLE IF NOT EXISTS reading_favorite_versions (user_id TEXT NOT NULL,item_id TEXT NOT NULL,version TEXT NOT NULL,PRIMARY KEY(user_id,item_id))',
+ 'CREATE TABLE IF NOT EXISTS reading_items (user_id TEXT NOT NULL,item_id TEXT NOT NULL,read_at TEXT NOT NULL,PRIMARY KEY(user_id,item_id))',
+ 'CREATE TABLE IF NOT EXISTS edition_reads (user_id TEXT NOT NULL,edition_date TEXT NOT NULL,read_at TEXT NOT NULL,read_version TEXT NOT NULL,PRIMARY KEY(user_id,edition_date))',
 ];
 type Value = string | number | null;
 type Row = Record<string, unknown>;
@@ -32,6 +34,15 @@ export class RadarDatabase {
  private ready?: Promise<void>;
  constructor(private url?: string, private localPath = '.local/radar.sqlite') {}
  prepare(query: string) { return new Statement(this, query); }
+ jsonEqual(left: string, right: string) {
+  if (this.url) return `(CAST(${left} AS jsonb)=CAST(${right} AS jsonb))`;
+  const nodes = (value: string) => `SELECT fullkey,CASE WHEN type IN ('integer','real') THEN 'number' ELSE type END,atom FROM json_tree(${value})`;
+  return `(NOT EXISTS(${nodes(left)} EXCEPT ${nodes(right)}) AND NOT EXISTS(${nodes(right)} EXCEPT ${nodes(left)}))`;
+ }
+ nextTimestamp(current: string, incoming: string) {
+  if (this.url) return `CASE WHEN CAST(${incoming} AS timestamptz)>CAST(${current} AS timestamptz) THEN ${incoming} ELSE to_char((CAST(${current} AS timestamptz) AT TIME ZONE 'UTC')+INTERVAL '0.001 seconds','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END`;
+  return `CASE WHEN julianday(${incoming})>julianday(${current}) THEN ${incoming} ELSE strftime('%Y-%m-%dT%H:%M:%fZ',julianday(${current})+1.0/86400000) END`;
+ }
  private initialize() {
   if (!this.ready) this.ready = (async () => {
    if (this.url) {

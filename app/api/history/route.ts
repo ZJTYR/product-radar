@@ -1,3 +1,9 @@
-import { database, initialize, route, json } from '@/lib/server';
+import { body, checkMutation, currentUser, database, HttpError, initialize, route, json } from '@/lib/server';
+import { editionReadSchema } from '@/lib/validation';
+import { editionReadingState, ReadingRecordMissing, ReadingVersionConflict, setEditionRead } from '@/lib/reading';
 export const dynamic = 'force-dynamic';
-export function GET() { return route(async () => { await initialize(); const rows = await database().prepare('SELECT * FROM editions ORDER BY date DESC LIMIT 365').all<{date:string,payload:string,updated_at:string,status:string}>(); return json({days:rows.results.map(r=>({date:r.date,count:JSON.parse(r.payload).length,updatedAt:r.updated_at,status:r.status}))}); }); }
+export function GET() { return route(async () => { const user=await currentUser();await initialize();return json(await editionReadingState(database(),user.userId)); }); }
+export function PUT(request:Request){return route(async()=>{
+ checkMutation(request);const value=editionReadSchema.parse(await body(request));const user=await currentUser();await initialize();
+ try{return json(await setEditionRead(database(),user.userId,value.date,value.read,value.version));}catch(error){if(error instanceof ReadingRecordMissing)throw new HttpError(404,error.message);if(error instanceof ReadingVersionConflict)throw new HttpError(409,error.message);throw error;}
+});}

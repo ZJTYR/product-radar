@@ -1,4 +1,5 @@
 export type ItemKind = 'product' | 'design' | 'ai';
+export type AIApplication = 'agents' | 'knowledge' | 'multimodal' | 'integration' | 'engineering';
 export interface SourceLink { label: string; url: string }
 export interface IntelItem {
   id: string; kind: ItemKind; name: string; title: string; subtitle: string;
@@ -7,6 +8,7 @@ export interface IntelItem {
   stars?: number | null; starsCheckedAt?: string; publishedAt?: string | null;
   discoveredAt: string; evidence: '官方资料' | '产品观察' | '官方发布';
   featured?: boolean; readMinutes: number;
+  aiApplication?: AIApplication;
   facts: string[]; audience: string; pain: string; workflow: string; scenario?: string;
   businessModel: string; differentiation: string; opportunity: string;
   designNotes: string[]; caveats: string[]; sources: SourceLink[];
@@ -15,6 +17,8 @@ export interface SavedItem { itemId: string; collection: string; note: string; c
 export interface Preferences { email: string; deliveryTime: string; emailEnabled: boolean }
 export type InterestAction = 'interested' | 'not_interested';
 export interface ItemFeedback { itemId: string; action: InterestAction; updatedAt: string }
+export interface ItemRead { itemId: string; readAt: string }
+export interface HistoryDay { date: string; count: number; updatedAt: string; status: string; readAt: string | null; hasUpdates: boolean }
 export interface FeedResponse {
  items: IntelItem[];
  meta: { updatedAt: string; date: string; total: number; scheduleStatus: string; emailStatus: string; sourceCount: number; lastRunStatus: string; lastError?: string; editionItemIds?: string[]; emailConfigured?: boolean; };
