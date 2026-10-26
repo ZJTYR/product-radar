@@ -48,6 +48,7 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
   const [busy, setBusy] = useState(false);
   const [undoToken, setUndoToken] = useState<string | null>(null);
   const undoItemRef = useRef<IntelItem | null>(null);
+  const undoTokenRef = useRef<string | null>(null);
   const recommendationSequenceRef = useRef(0);
   const feedbackSequenceRef = useRef(0);
   const mountedRef = useRef(true);
@@ -98,7 +99,7 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
   const reconcileLocked = useCallback(async () => {
     const feedbackVersion = ++feedbackSequenceRef.current;
     const recommendationVersion = ++recommendationSequenceRef.current;
-    setLoading(true); setFeedbackReady(false); setUndoToken(null); undoItemRef.current = null;
+    setLoading(true); setFeedbackReady(false); setUndoToken(null); undoTokenRef.current = null; undoItemRef.current = null;
     const [feedbackResult, recommendationResult] = await Promise.allSettled([
       interestRequest<FeedbackResult>("/api/feedback"),
       interestRequest<RecommendationResult>("/api/recommendations?limit=12"),
@@ -140,7 +141,7 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
     try {
       const result = await interestRequest<FeedbackResult>("/api/feedback", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId: item.id, action }) });
       if (!mountedRef.current) return true;
-      applyResult(result); setUndoToken(result.undoToken || null); undoItemRef.current = item;
+      applyResult(result); setUndoToken(result.undoToken || null); undoTokenRef.current = result.undoToken || null; undoItemRef.current = item;
       notify(action === "interested" ? `已留下 ${item.name}，可在我的收藏查看` : `已划走 ${item.name}，会调整后续推荐`);
       await loadRecommendations();
       return true;
@@ -151,12 +152,12 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
   }, [applyResult, feedbackReady, loadRecommendations, mutationLockRef, notify, recoverUncertainWrite]);
 
   const undo = useCallback(async () => {
-    if (mutationLockRef.current || !undoToken) return;
+    if (mutationLockRef.current || !undoToken) return false;
     mutationLockRef.current = true; setBusy(true); ++recommendationSequenceRef.current;
     try {
       const result = await interestRequest<FeedbackResult>("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ undoToken }) });
-      if (!mountedRef.current) return;
-      applyResult(result); setUndoToken(null);
+      if (!mountedRef.current) return false;
+      applyResult(result); setUndoToken(null); undoTokenRef.current = null;
       const restored = undoItemRef.current;
       const isEligible = restored && !result.feedback.some(entry => entry.itemId === restored.id) && !result.favorites.some(entry => entry.itemId === restored.id);
       notify("已撤销上一次选择");
@@ -165,8 +166,9 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
         const items = [restored, ...previous.items.filter(item => item.id !== restored.id)];
         return { ...previous, items, remaining: Math.max(items.length, previous.remaining) };
       });
+      return true;
     } catch (err) {
-      await recoverUncertainWrite(err);
+      await recoverUncertainWrite(err); return false;
     }
     finally { mutationLockRef.current = false; if (mountedRef.current) setBusy(false); }
   }, [applyResult, loadRecommendations, mutationLockRef, notify, recoverUncertainWrite, undoToken]);
@@ -177,7 +179,7 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
     try {
       const result = await interestRequest<FeedbackResult>(`/api/feedback?itemId=${encodeURIComponent(itemId)}`, { method: "DELETE" });
       if (!mountedRef.current) return;
-      applyResult(result); setUndoToken(null); notify("已恢复这条内容，可重新参与推荐");
+      applyResult(result); setUndoToken(null); undoTokenRef.current = null; notify("已恢复这条内容，可重新参与推荐");
       await loadRecommendations();
     } catch (err) {
       await recoverUncertainWrite(err);
@@ -185,7 +187,8 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
     finally { mutationLockRef.current = false; if (mountedRef.current) setBusy(false); }
   }, [applyResult, feedbackReady, loadRecommendations, mutationLockRef, notify, recoverUncertainWrite]);
 
-  return { feedback, feedbackReady, feedbackError, recommendations, loading, error, busy, undoToken, submit, undo, restore, reconcile, loadRecommendations };
+  const getUndoToken = useCallback(() => undoTokenRef.current, []);
+  return { getUndoToken, feedback, feedbackReady, feedbackError, recommendations, loading, error, busy, undoToken, submit, undo, restore, reconcile, loadRecommendations };
 }
 
 function DiscoveryImage({ item }: { item: IntelItem }) {

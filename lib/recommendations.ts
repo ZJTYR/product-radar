@@ -1,4 +1,6 @@
-import type { IntelItem, ItemFeedback, SavedItem } from './types.ts';
+import type { IntelItem, ItemFeedback, ItemRead, SavedItem } from './types.ts';
+export type RecommendationScope='all'|'products'|'github'|'ai';
+export interface RecommendationOptions {scope?:RecommendationScope;excludeIds?:string[];readItems?:ItemRead[]}
 type Feature={key:string;label:string;weight:number;topic:boolean};
 const normalize=(value:string)=>value.trim().toLocaleLowerCase();
 export function recommendationFeatures(item:IntelItem):Feature[] {
@@ -15,8 +17,9 @@ export function recommendationFeatures(item:IntelItem):Feature[] {
  }
  return [...new Map(features.map(feature=>[feature.key,feature])).values()];
 }
-export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorites:SavedItem[],limit=12,at=Date.now()) {
+export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorites:SavedItem[],limit=12,at=Date.now(),options:RecommendationOptions={}) {
  const byId=new Map(items.map(item=>[item.id,item]));const choices=new Map(feedback.map(entry=>[entry.itemId,entry.action]));
+ const scope=options.scope||'all';const excluded=new Set([...(options.excludeIds||[]),...(options.readItems||[]).map(entry=>entry.itemId)]);
  const saved=new Set(favorites.map(entry=>entry.itemId));const weights=new Map<string,number>();const labels=new Map<string,string>();
  const signals=new Map<string,number>(favorites.map(entry=>[entry.itemId,2]));
  for(const entry of feedback)signals.set(entry.itemId,entry.action==='interested'?3:-2);
@@ -24,20 +27,27 @@ export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorit
   weights.set(feature.key,(weights.get(feature.key)||0)+signal);if(feature.topic)labels.set(feature.key,feature.label);
  }}
  for(const [key,value] of weights)weights.set(key,Math.max(-8,Math.min(8,value)));
- const candidates=[...byId.values()].filter(item=>!choices.has(item.id)&&!saved.has(item.id)).map(item=>{
+ const eventTime=(item:IntelItem)=>Date.parse(item.publishedAt||item.discoveredAt);
+ const candidates=[...byId.values()].filter(item=>{
+  if(choices.has(item.id)||saved.has(item.id)||excluded.has(item.id))return false;
+  if(scope==='products')return item.kind==='product';
+  if(scope==='github')return item.kind==='product'&&Boolean(item.github)&&item.stars!=null&&item.stars>0;
+  if(scope==='ai'){const time=eventTime(item);return item.kind==='ai'&&Boolean(item.aiApplication)&&Number.isFinite(time)&&time<=at&&time>=at-7*86400000;}
+  return true;
+ }).map(item=>{
   const features=recommendationFeatures(item);const age=Math.max(0,(at-Date.parse(item.discoveredAt))/86400000);
   const affinity=features.reduce((total,feature)=>total+(weights.get(feature.key)||0)*feature.weight,0);
   return {item,features,score:affinity+(Number.isFinite(age)?1/(1+age/14):0)};
- }).sort((a,b)=>b.score-a.score||b.item.discoveredAt.localeCompare(a.item.discoveredAt)||a.item.id.localeCompare(b.item.id));
+ }).sort((a,b)=>(scope==='ai'?eventTime(b.item)-eventTime(a.item):b.score-a.score)||b.item.discoveredAt.localeCompare(a.item.discoveredAt)||a.item.id.localeCompare(b.item.id));
  const remaining=candidates.length;const result:IntelItem[]=[];const reasons:Record<string,string>={};
  const recentCategories=feedback.slice(0,3).map(entry=>byId.get(entry.itemId)?.category).filter((value):value is string=>Boolean(value));
  while(candidates.length&&result.length<limit){let index=0;let exploring=false;
   // 槽位跟随已反馈数量推进，逐条换卡并重新请求时也会真正遇到探索内容。
-  if((feedback.length+result.length)%4===3){const categories=new Set([...recentCategories,...result.slice(-3).map(item=>item.category)]);const alternative=candidates.findIndex(value=>!categories.has(value.item.category));if(alternative>=0){index=alternative;exploring=true;}}
-  else if(result.length>=2&&result.at(-1)!.category===result.at(-2)!.category){const alternative=candidates.findIndex(value=>value.item.category!==result.at(-1)!.category);if(alternative>=0){index=alternative;exploring=true;}}
+  if(scope!=='ai'&&(feedback.length+result.length)%4===3){const categories=new Set([...recentCategories,...result.slice(-3).map(item=>item.category)]);const alternative=candidates.findIndex(value=>!categories.has(value.item.category));if(alternative>=0){index=alternative;exploring=true;}}
+  else if(scope!=='ai'&&result.length>=2&&result.at(-1)!.category===result.at(-2)!.category){const alternative=candidates.findIndex(value=>value.item.category!==result.at(-1)!.category);if(alternative>=0){index=alternative;exploring=true;}}
   const chosen=candidates.splice(index,1)[0];result.push(chosen.item);
   const match=chosen.features.filter(feature=>(weights.get(feature.key)||0)>0).sort((a,b)=>(weights.get(b.key)||0)*b.weight-(weights.get(a.key)||0)*a.weight)[0];
-  reasons[chosen.item.id]=exploring?'换个方向，保留跨行业探索':match?match.topic?`与你留下的「${match.label}」相关`:`与你留下的内容有${match.label==='同一公众号作者'?'相同作者':'相近方向或来源'}`:'探索已收集的产品与设计灵感';
+  reasons[chosen.item.id]=scope==='ai'?'近七天 AI 应用能力与落地变化':exploring?'换个方向，保留跨行业探索':match?match.topic?`与你留下的「${match.label}」相关`:`与你留下的内容有${match.label==='同一公众号作者'?'相同作者':'相近方向或来源'}`:'探索已收集的产品与设计灵感';
  }
  const topics=[...labels].map(([key,label])=>({label,value:weights.get(key)||0}));
  const topicList=(positive:boolean)=>[...new Set(topics.filter(value=>positive?value.value>0:value.value<0).sort((a,b)=>positive?b.value-a.value:a.value-b.value).map(value=>value.label))].slice(0,6);

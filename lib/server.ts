@@ -4,6 +4,7 @@ import { seedItems } from './seed';
 import type { IntelItem } from './types';
 import { isSameOriginMutation } from './validation';
 import { ZodError } from 'zod';
+import { persistEdition } from './editions';
 
 export class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
 export function database() { return getDatabase(); }
@@ -30,12 +31,5 @@ export async function initialize() {
 export async function library() { const result = await database().prepare('SELECT payload FROM intel_items ORDER BY updated_at DESC,id').all<{payload: string}>(); return result.results.map(row => JSON.parse(row.payload) as IntelItem); }
 export async function setting(key: string) { return (await database().prepare('SELECT value FROM settings WHERE key=?').bind(key).first<{value:string}>())?.value; }
 export async function saveEdition(date: string, items: IntelItem[], status: string, kind: string) {
- const db = database(); const at = now();
- // Database batches are transactional: the library and full daily snapshot commit together. Stable IDs make ingest replay safe.
- await db.batch([
- ...items.map(item => db.prepare('INSERT INTO intel_items(id,payload,updated_at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at').bind(item.id,JSON.stringify(item),at)),
- db.prepare('INSERT INTO editions(date,payload,updated_at,status) VALUES (?,?,?,?) ON CONFLICT(date) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at,status=excluded.status').bind(date,JSON.stringify(items),at,status),
- db.prepare('INSERT INTO runs(id,kind,status,detail,created_at) VALUES (?,?,?,?,?)').bind(crypto.randomUUID(),kind,status,JSON.stringify({count:items.length,date}),at),
- ]);
- return at;
+ return persistEdition(database(),date,items,status,kind);
 }

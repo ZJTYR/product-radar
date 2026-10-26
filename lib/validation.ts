@@ -10,6 +10,7 @@ export const itemSchema = z.object({
  accent: z.string().regex(/^#(?:[a-fA-F0-9]{3}|[a-fA-F0-9]{6}|[a-fA-F0-9]{8})$/), website: httpUrl, github: httpUrl.optional(), repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional(),
  stars: z.number().int().nonnegative().nullable().optional(), starsCheckedAt: timestamp.optional(), publishedAt: timestamp.nullable().optional(),
  discoveredAt: timestamp, evidence: z.enum(['官方资料', '产品观察', '官方发布']), featured: z.boolean().optional(), readMinutes: z.number().int().min(1).max(120),
+ aiApplication: z.enum(['agents', 'knowledge', 'multimodal', 'integration', 'engineering']).optional(),
  facts: z.array(text).min(1).max(30), audience: text, pain: text, workflow: text, businessModel: text, differentiation: text, opportunity: text,
  designNotes: z.array(text).max(30), caveats: z.array(text).max(30), sources: z.array(z.object({ label: text, url: httpUrl })).min(1).max(30),
 }).strict();
@@ -26,6 +27,12 @@ export const feedbackItemIdSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 export const feedbackSchema = z.object({ itemId: feedbackItemIdSchema, action: z.enum(['interested', 'not_interested']) }).strict();
 export const undoSchema = z.object({ undoToken: z.string().uuid() }).strict();
 export const recommendationLimitSchema = z.coerce.number().int().min(1).max(30).default(12);
+export const recommendationScopeSchema = z.enum(['all', 'products', 'github', 'ai']).default('all');
+export const recommendationExcludeSchema = z.string().max(5049).default('').transform(value => value ? value.split(',') : []).pipe(z.array(feedbackItemIdSchema).max(50)).transform(value => [...new Set(value)]);
+export const itemReadSchema = z.object({ itemId: feedbackItemIdSchema }).strict();
+export const editionReadSchema = z.object({ date: dateSchema, read: z.boolean(), version: timestamp.optional() }).strict().superRefine((value, ctx) => {
+ if (value.read && !value.version) ctx.addIssue({ code: 'custom', path: ['version'], message: '标记已读须提供实际打开的简报版本' });
+});
 export const systemSchema = z.object({ schedule_status: z.string().max(400).optional(), schedule_id: z.string().max(200).optional(), schedule_updated_at: timestamp.optional() }).strict();
 export function isSameOriginMutation(request: Request) {
  const site = request.headers.get('sec-fetch-site');
