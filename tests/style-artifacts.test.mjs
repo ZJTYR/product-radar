@@ -15,6 +15,11 @@ const layoutCss = `
 .image-gallery-thumbnails{display:flex;overflow-x:auto}
 .image-lightbox{max-width:calc(100vw - 40px);overflow:hidden}
 .image-lightbox-canvas{display:flex;overflow:auto}
+.annotation-selection-toolbar{display:flex;position:fixed}
+.annotation-notebook-inner{display:flex;flex-direction:column}
+.annotation-notebook-scroll{overflow:auto}
+.annotation-editor-inner{display:flex}
+.annotation-highlight{background:#dbebce}
 `;
 
 test('compiled layout contracts pass across split and immutable CSS output paths', async () => {
@@ -23,8 +28,8 @@ test('compiled layout contracts pass across split and immutable CSS output paths
     await mkdir(join(directory, 'immutable', 'chunks'), { recursive: true });
     await writeFile(join(directory, 'immutable', 'chunks', 'page.css'), layoutCss);
     await writeFile(join(directory, 'base.css'), 'body{margin:0}');
-    assert.deepEqual(await verifyStylePath(directory), { files: 2, modules: 10 });
-    assert.deepEqual(await verifyStylePath(join(directory, 'immutable', 'chunks', 'page.css')), { files: 1, modules: 10 });
+    assert.deepEqual(await verifyStylePath(directory), { files: 2, modules: 15 });
+    assert.deepEqual(await verifyStylePath(join(directory, 'immutable', 'chunks', 'page.css')), { files: 1, modules: 15 });
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

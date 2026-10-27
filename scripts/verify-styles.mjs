@@ -15,6 +15,11 @@ const requirements = [
   { selector: '.image-gallery-thumbnails', properties: { display: value => value === 'flex', 'overflow-x': value => value === 'auto' } },
   { selector: '.image-lightbox', properties: { 'max-width': value => value.includes('100vw'), overflow: value => value === 'hidden' } },
   { selector: '.image-lightbox-canvas', properties: { display: value => value === 'flex', overflow: value => value === 'auto' } },
+  { selector: '.annotation-selection-toolbar', properties: { display: value => value === 'flex', position: value => value === 'fixed' } },
+  { selector: '.annotation-notebook-inner', properties: { display: value => value === 'flex', 'flex-direction': value => value === 'column' } },
+  { selector: '.annotation-notebook-scroll', properties: { overflow: value => value === 'auto' } },
+  { selector: '.annotation-editor-inner', properties: { display: value => value === 'flex' } },
+  { selector: '.annotation-highlight', properties: { background: value => !['none', 'transparent'].includes(value) } },
 ];
 
 // 只认可无条件规则；样式误放在窄屏、减少动画等条件中也必须阻止发布。
