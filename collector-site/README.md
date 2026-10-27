@@ -26,6 +26,10 @@
 
 `POST /api/catalog` 接收 `{items: IntelItem[]}`（1—50 条），按稳定 ID 更新长期产品库，不更改期刊快照、用户收藏或每日运行状态。`scenario` 和 `imageCaption` 为兼容旧内容的可选字段。需要修改当天简报表达时另行提交完整 `/api/ingest`；历史快照保持原样。
 
+产品、设计和AI资讯统一支持可选 `images:[{url,caption,sourceUrl}]`（最多50张）。每天主动查找官网、文档、发布记录和官方仓库中的不同功能界面、流程与场景图，可靠资料丰富时争取5—12张，有更多有价值图片时继续补充，不凑数、不把logo当截图。逐图核验可访问性、MIME、实际尺寸与来源，说明区分真实界面、官方演示、宣传或示意图及已知版本。旧 `image`/`imageCaption` 继续作为兼容封面。正式Vercel工作台负责多图切换与大图查看，本站负责采集和同步字段。
+
+`/api/update-guide` 在已有记录中提供 `imageCount` 与 `missingImages` 辅助补图；它们是已存URL计数，不代表外链实时可用性。先取得完整旧记录，合并原画廊与新图、核验并去重，通过 `/api/catalog` 提交完整IntelItem；保留稳定id、事实、来源和首次发现/实际发布日期，不覆盖历史简报。运行时统一规则为 `lib/collection-policy.ts`，版本2026-10-27.1。
+
 后台服务访问必须通过 Sites 官方服务访问方式，凭据只在运行时获得，不放在代码、浏览器或任务提示中。`/api/ingest`、`/api/catalog`、`/api/system` 依赖 owner-private 访问边界，不能直接将本站改成公开。
 
 ## 邮件

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
 import { ArrowLeft, ArrowRight, ArrowUpRight, Bookmark, Check, CircleHelp, Compass, EyeOff, Heart, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import type { IntelItem, SavedItem } from "@/lib/types";
+import { getCoverImage } from "@/lib/media";
 
 export type InterestAction = "interested" | "not_interested";
 export interface ReadingFeedback { itemId: string; action: InterestAction; updatedAt: string }
@@ -193,7 +194,8 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
 
 function DiscoveryImage({ item }: { item: IntelItem }) {
   const [failed, setFailed] = useState(false);
-  return item.image && !failed ? <div className="discovery-image"><img src={item.image} alt={`${item.name} · ${item.imageCaption || "官方公开配图"}`} draggable={false} onError={() => setFailed(true)} /><span>{item.imageCaption || "官方公开配图"}</span></div> : <div className="discovery-image discovery-image-empty"><Compass size={30} /><strong>{item.name}</strong><span>{failed ? "配图暂时无法加载，可继续阅读" : "暂无产品截图"}</span></div>;
+  const cover = getCoverImage(item);
+  return cover && !failed ? <div className="discovery-image"><img src={cover.url} alt={`${item.name} · ${cover.caption}`} draggable={false} onError={() => setFailed(true)} /><span>{cover.caption}</span></div> : <div className="discovery-image discovery-image-empty"><Compass size={30} /><strong>{item.name}</strong><span>{failed ? "配图暂时无法加载，可继续阅读" : "暂无产品截图"}</span></div>;
 }
 
 function DiscoveryCard({ item, reason, disabled, onFeedback, onOpen }: {
@@ -231,7 +233,7 @@ function DiscoveryCard({ item, reason, disabled, onFeedback, onOpen }: {
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); void onFeedback(item, event.key === "ArrowRight" ? "interested" : "not_interested"); }
   }}>
     {Math.abs(drag) > 30 && <span className={`swipe-indicator ${drag > 0 ? "positive" : "negative"}`} aria-hidden="true">{Math.abs(drag) >= 90 ? "松开以" : "继续"}{drag > 0 ? "留下" : "划走"}</span>}
-    <DiscoveryImage item={item} />
+    <DiscoveryImage key={`${item.id}:${getCoverImage(item)?.url || "no-image"}`} item={item} />
     <div className="discovery-card-content"><div className="card-kicker"><span>{item.category}</span><span>{item.readMinutes} 分钟 · 收录于 {date}</span><span>{item.evidence}</span></div><h2>{item.name}</h2><h3>{item.title}</h3><p className="discovery-summary">{item.summary}</p><div className="discovery-value"><LightbulbIcon /><p><strong>值得关注</strong>{item.differentiation}</p></div><div className="card-tags">{item.tags.slice(0, 4).map(tag => <span key={tag}>{tag}</span>)}</div><div className="discovery-reason"><Sparkles size={14} /><span>{reason || "探索一个新的产品方向"}</span></div><button className="text-link discovery-read" onClick={() => onOpen(item)}>看完整拆解与原始资料 <ArrowUpRight size={15} /></button></div>
     <DiscoveryChoices item={item} disabled={disabled} onFeedback={onFeedback} />
   </article>;
