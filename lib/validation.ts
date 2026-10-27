@@ -2,10 +2,13 @@ import { z } from 'zod';
 const text = z.string().trim().min(1).max(8000);
 export const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v => !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v, '日期无效');
 const timestamp = z.string().max(40).refine(v => !Number.isNaN(Date.parse(v)), '时间格式无效');
-export const httpUrl = z.string().url().max(2000).refine(v => ['http:', 'https:'].includes(new URL(v).protocol), '仅支持 http(s) 来源');
+export const httpUrl = z.string().url().max(2000).refine(v => { try { return ['http:', 'https:'].includes(new URL(v).protocol); } catch { return false; } }, '仅支持 http(s) 来源');
+const imageUrl = z.string().max(2000).refine(v => /^\/images\/[A-Za-z0-9_.\/-]+$/.test(v) && !v.includes('..') || httpUrl.safeParse(v).success, '图片仅允许 /images/ 路径或 http(s) URL');
+export const imageSchema = z.object({ url: imageUrl, caption: z.string().trim().min(1).max(300), sourceUrl: httpUrl }).strict();
+const imageGallerySchema = z.array(imageSchema).max(50).refine(images => new Set(images.map(image => image.url)).size === images.length, '图集不能重复图片 URL');
 export const itemSchema = z.object({
  id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), kind: z.enum(['product', 'design', 'ai']), name: text, title: text, subtitle: text,
- summary: text, category: text, tags: z.array(z.string().max(80)).max(30), image: z.string().max(2000).refine(v => /^\/images\/[A-Za-z0-9_.\/-]+$/.test(v) && !v.includes('..') || httpUrl.safeParse(v).success, '图片仅允许 /images/ 路径或 http(s) URL').optional(),
+ summary: text, category: text, tags: z.array(z.string().max(80)).max(30), image: imageUrl.optional(), images: imageGallerySchema.optional(),
  imageCaption: z.string().trim().min(1).max(300).optional(), scenario: text.optional(),
  accent: z.string().regex(/^#(?:[a-fA-F0-9]{3}|[a-fA-F0-9]{6}|[a-fA-F0-9]{8})$/), website: httpUrl, github: httpUrl.optional(), repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional(),
  stars: z.number().int().nonnegative().nullable().optional(), starsCheckedAt: timestamp.optional(), publishedAt: timestamp.nullable().optional(),

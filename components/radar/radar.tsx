@@ -6,10 +6,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownToLine, ArrowRight, ArrowUpRight, Bell, Bookmark, CalendarDays, Check, ChevronRight, CircleHelp, Clock3, Compass, ExternalLink, FileText, GitFork as Github, LayoutGrid, Lightbulb, Loader2, Mail, Menu, Radio, RefreshCw, Search, Settings2, Sparkles, Star, X, EyeOff, RotateCcw } from "lucide-react";
 import type { FeedResponse, IntelItem, Preferences, SavedItem } from "@/lib/types";
+import { getCoverImage } from "@/lib/media";
 import { DismissedItemsDialog, RecommendationsPanel, useInterestFeed } from "./interest";
 import { DiscoveryGrid } from "./discovery-grid";
 import type { DiscoveryGridHandle } from "./discovery-grid";
 import { AIFrontier } from "./ai-frontier";
+import { ImageGallery } from "./image-gallery";
 
 type View = "today" | "recommendations" | "products" | "design" | "saved" | "history";
 type HistoryDay = { date: string; count: number; updatedAt: string; status: string; readAt: string | null; hasUpdates: boolean };
@@ -34,15 +36,16 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 function Visual({ item, large = false }: { item: IntelItem; large?: boolean }) {
-  return <ProductVisual key={`${item.id}:${item.image || "no-image"}`} item={item} large={large} />;
+  return <ProductVisual key={`${item.id}:${getCoverImage(item)?.url || "no-image"}`} item={item} large={large} />;
 }
 
 function ProductVisual({ item, large }: { item: IntelItem; large: boolean }) {
   const [failed, setFailed] = useState(false);
-  const hasImage = Boolean(item.image) && !failed;
-  const caption = item.imageCaption || "官方公开配图";
+  const cover = getCoverImage(item);
+  const hasImage = Boolean(cover) && !failed;
+  const caption = cover?.caption || "官方公开配图";
   return <div className={`visual ${large ? "visual-large" : ""} ${hasImage ? "visual-image" : "visual-empty"}`} style={hasImage ? { backgroundColor: item.accent || "#e8eeea" } : undefined}>
-    {hasImage ? <><img src={item.image} alt={`${item.name} · ${caption}`} onError={() => setFailed(true)} loading="lazy" /><span className="visual-kind">{caption}</span></> : <div className="visual-fallback"><Compass size={19} /><span><strong>{item.name}</strong><small>{failed ? "产品配图暂时无法加载" : "暂无产品截图"}</small></span></div>}
+    {hasImage ? <><img src={cover?.url} alt={`${item.name} · ${caption}`} onError={() => setFailed(true)} loading="lazy" /><span className="visual-kind">{caption}</span></> : <div className="visual-fallback"><Compass size={19} /><span><strong>{item.name}</strong><small>{failed ? "产品配图暂时无法加载" : "暂无产品截图"}</small></span></div>}
   </div>;
 }
 
@@ -263,14 +266,14 @@ export default function Radar() {
     </>}
     <footer className="page-footer"><div><Radio size={15} /><span>拾光</span><span className="footer-dot">·</span><span>让每一次发现，都有下一步</span></div><span>{feed?.meta.scheduleStatus ? `${feed.meta.scheduleStatus} · ` : ""}{feed?.meta.updatedAt ? `资料更新于 ${day(feed.meta.updatedAt)} ${time(feed.meta.updatedAt)}` : "资料来自公开来源"}<span className="footer-dot">·</span>商业判断为分析推断</span></footer>
     </main></div>
-    <dialog className="detail-dialog" ref={detailRef} aria-labelledby="detail-heading" onCancel={() => setSelected(null)} onClick={event => { if (event.target === event.currentTarget) setSelected(null); }}>{selected && <div className="dialog-inner" key={selected.id}>
+    <dialog className="detail-dialog" ref={detailRef} aria-labelledby="detail-heading" onCancel={event => { if (event.target === event.currentTarget) setSelected(null); }} onClick={event => { if (event.target === event.currentTarget) setSelected(null); }}>{selected && <div className="dialog-inner" key={selected.id}>
       <div className="dialog-top"><span><span className="live-dot" />{selected.kind === "design" ? "设计灵感" : selected.kind === "ai" ? "AI 动态" : "产品解读"}</span><button className="icon-button" onClick={() => setSelected(null)} aria-label="关闭详情"><X size={22} /></button></div>
       <div className="detail-scroll"><div className="detail-content">
         <div className="card-kicker"><span>{selected.category}</span><span>{selected.evidence}</span>{selected.stars != null && <span><Star size={12} />{stars(selected.stars)} Stars</span>}</div>
         <h2>{selected.name}</h2><h3 className="detail-title" id="detail-heading">{selected.title}</h3>
         <p className="detail-summary">{selected.summary}</p>
         <div className="detail-links"><a className="button primary" href={selected.website} target="_blank" rel="noopener noreferrer">{selected.kind === "product" ? "了解 / 体验产品" : "查看官方介绍"} <ArrowUpRight size={15} /></a>{selected.github && <a className="button secondary" href={selected.github} target="_blank" rel="noopener noreferrer"><Github size={15} />GitHub</a>}{dismissButton(selected)}{bookmark(selected)}</div>
-        <div className="detail-product-visual"><Visual item={selected} large /></div>
+        <ImageGallery item={selected} />
         <div className="detail-reading">
           <section className="analysis-section"><h4><span>01</span>{selected.kind === "product" ? "谁会用它" : "这与谁有关"}</h4><p>{selected.audience}</p></section>
           <section className="analysis-section"><h4><span>02</span>{selected.kind === "design" ? "设计背景与要解决的问题" : "为什么会有这个需求"}</h4><p>{selected.pain}</p></section>

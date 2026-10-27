@@ -11,6 +11,10 @@ const layoutCss = `
 .frontier-card{padding:14px 16px;background:#fff;border:1px solid #ccd9c6}
 .product-grid.discovery-product-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
 .grid-card-actions,.history-day-open,.discovery-grid-toolbar{display:flex}
+.image-gallery-stage{height:380px;position:relative}
+.image-gallery-thumbnails{display:flex;overflow-x:auto}
+.image-lightbox{max-width:calc(100vw - 40px);overflow:hidden}
+.image-lightbox-canvas{display:flex;overflow:auto}
 `;
 
 test('compiled layout contracts pass across split and immutable CSS output paths', async () => {
@@ -19,8 +23,8 @@ test('compiled layout contracts pass across split and immutable CSS output paths
     await mkdir(join(directory, 'immutable', 'chunks'), { recursive: true });
     await writeFile(join(directory, 'immutable', 'chunks', 'page.css'), layoutCss);
     await writeFile(join(directory, 'base.css'), 'body{margin:0}');
-    assert.deepEqual(await verifyStylePath(directory), { files: 2, modules: 6 });
-    assert.deepEqual(await verifyStylePath(join(directory, 'immutable', 'chunks', 'page.css')), { files: 1, modules: 6 });
+    assert.deepEqual(await verifyStylePath(directory), { files: 2, modules: 10 });
+    assert.deepEqual(await verifyStylePath(join(directory, 'immutable', 'chunks', 'page.css')), { files: 1, modules: 10 });
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
