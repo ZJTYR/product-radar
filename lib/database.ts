@@ -16,6 +16,8 @@ const schema = [
  'CREATE TABLE IF NOT EXISTS reading_favorite_versions (user_id TEXT NOT NULL,item_id TEXT NOT NULL,version TEXT NOT NULL,PRIMARY KEY(user_id,item_id))',
  'CREATE TABLE IF NOT EXISTS reading_items (user_id TEXT NOT NULL,item_id TEXT NOT NULL,read_at TEXT NOT NULL,PRIMARY KEY(user_id,item_id))',
  'CREATE TABLE IF NOT EXISTS edition_reads (user_id TEXT NOT NULL,edition_date TEXT NOT NULL,read_at TEXT NOT NULL,read_version TEXT NOT NULL,PRIMARY KEY(user_id,edition_date))',
+ 'CREATE TABLE IF NOT EXISTS reading_annotations (id TEXT PRIMARY KEY,user_id TEXT NOT NULL,item_id TEXT NOT NULL,payload TEXT NOT NULL,version TEXT NOT NULL,create_version TEXT NOT NULL,create_request TEXT NOT NULL,deleted_at TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)',
+ 'CREATE INDEX IF NOT EXISTS reading_annotations_owner_item ON reading_annotations(user_id,item_id,updated_at)',
 ];
 type Value = string | number | null;
 type Row = Record<string, unknown>;
