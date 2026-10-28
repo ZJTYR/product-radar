@@ -9,6 +9,8 @@ import { inspectStyleArtifacts, verifyStylePath } from '../scripts/verify-styles
 const layoutCss = `
 .frontier-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
 .frontier-card{padding:14px 16px;background:#fff;border:1px solid #ccd9c6}
+.frontier-card:last-child:nth-child(odd){grid-column:1/-1}
+.frontier-open>p{-webkit-line-clamp:2;overflow:hidden}
 .product-grid.discovery-product-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
 .grid-card-actions,.history-day-open,.discovery-grid-toolbar{display:flex}
 .image-gallery-stage{height:380px;position:relative}
@@ -28,8 +30,8 @@ test('compiled layout contracts pass across split and immutable CSS output paths
     await mkdir(join(directory, 'immutable', 'chunks'), { recursive: true });
     await writeFile(join(directory, 'immutable', 'chunks', 'page.css'), layoutCss);
     await writeFile(join(directory, 'base.css'), 'body{margin:0}');
-    assert.deepEqual(await verifyStylePath(directory), { files: 2, modules: 15 });
-    assert.deepEqual(await verifyStylePath(join(directory, 'immutable', 'chunks', 'page.css')), { files: 1, modules: 15 });
+    assert.deepEqual(await verifyStylePath(directory), { files: 2, modules: 17 });
+    assert.deepEqual(await verifyStylePath(join(directory, 'immutable', 'chunks', 'page.css')), { files: 1, modules: 17 });
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

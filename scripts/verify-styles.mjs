@@ -7,6 +7,8 @@ const compact = value => value.replace(/\s+/g, '').toLowerCase();
 const requirements = [
   { selector: '.frontier-list', properties: { display: value => value === 'grid', 'grid-template-columns': value => compact(value) === 'repeat(2,minmax(0,1fr))' } },
   { selector: '.frontier-card', properties: { padding: value => value !== '0', background: value => !['none', 'transparent'].includes(value), border: value => value !== '0' && value !== 'none' } },
+  { selector: '.frontier-card:last-child:nth-child(odd)', properties: { 'grid-column': value => compact(value) === '1/-1' } },
+  { selector: '.frontier-open>p', properties: { '-webkit-line-clamp': value => value === '2', overflow: value => value === 'hidden' } },
   { selector: '.product-grid.discovery-product-grid', properties: { 'grid-template-columns': value => compact(value) === 'repeat(4,minmax(0,1fr))' } },
   { selector: '.grid-card-actions', properties: { display: value => value === 'flex' } },
   { selector: '.history-day-open', properties: { display: value => value === 'flex' } },
