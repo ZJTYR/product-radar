@@ -126,5 +126,7 @@ export async function updateFavoriteCollection(db:RadarDatabase,userId:string,va
    favoriteVersion(db,userId,value.itemId,crypto.randomUUID()),
   ],result:null};
  });
- return db.prepare(favoriteSelect+' AND item_id=?').bind(userId,value.itemId).first<SavedItem>();
+ const saved=await db.prepare(favoriteSelect+' AND item_id=?').bind(userId,value.itemId).first<SavedItem>();
+ if (!saved) throw new ReadingItemMissing('收藏已取消，请重新收藏后再分类');
+ return saved;
 }
