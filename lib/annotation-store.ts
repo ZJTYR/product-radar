@@ -6,6 +6,7 @@ import { createAnnotationAnchor, getAnnotationBlocks } from './annotations.ts';
 import { annotationCreateSchema, annotationUpdateSchema } from './annotation-validation.ts';
 import type { AnnotationCreateInput } from './annotation-validation.ts';
 import { feedbackItemIdSchema } from './validation.ts';
+import { favoriteNoteInserts } from './favorite-notes.ts';
 
 export class AnnotationError extends Error {
   constructor(public status: 400 | 404 | 409, message: string) { super(message); }
@@ -52,19 +53,11 @@ async function sourceItem(db: RadarDatabase, itemId: string, sourceDate: string 
 
 export async function listAnnotations(db: RadarDatabase, userId: string, itemId?: string): Promise<AnnotationList> {
   const itemFilter = itemId === undefined ? undefined : feedbackItemIdSchema.parse(itemId);
+  const imports = await favoriteNoteInserts(db, userId, itemFilter);
+  if (imports.length) await db.batch(imports);
   const notesStatement = db.prepare(`SELECT ${noteColumns} FROM reading_annotations WHERE user_id=? AND deleted_at IS NULL${itemFilter ? ' AND item_id=?' : ''} ORDER BY updated_at DESC,id`);
-  const favoritesStatement = db.prepare(`SELECT f.item_id as "itemId",f.note as body,f.created_at as "createdAt",f.updated_at as "updatedAt",i.payload as "itemPayload" FROM favorites f LEFT JOIN intel_items i ON i.id=f.item_id WHERE f.user_id=? AND TRIM(f.note)<>''${itemFilter ? ' AND f.item_id=?' : ''} ORDER BY f.updated_at DESC,f.item_id`);
-  const [notes, favorites] = await Promise.all([
-    (itemFilter ? notesStatement.bind(userId, itemFilter) : notesStatement.bind(userId)).all<AnnotationRow>(),
-    (itemFilter ? favoritesStatement.bind(userId, itemFilter) : favoritesStatement.bind(userId)).all<{ itemId: string; body: string; createdAt: string; updatedAt: string; itemPayload: string | null }>(),
-  ]);
-  return {
-    notes: notes.results.map(noteFromRow),
-    favoriteNotes: favorites.results.filter(row => row.body.trim()).map(row => {
-      const item = row.itemPayload ? JSON.parse(row.itemPayload) as IntelItem : null;
-      return { itemId: row.itemId, itemName: item?.name || row.itemId, itemTitle: item?.title || '', itemUrl: item?.website || '', body: row.body, createdAt: row.createdAt, updatedAt: row.updatedAt };
-    }),
-  };
+  const notes = await (itemFilter ? notesStatement.bind(userId, itemFilter) : notesStatement.bind(userId)).all<AnnotationRow>();
+  return { notes: notes.results.map(noteFromRow), favoriteNotes: [] };
 }
 
 export async function createAnnotation(db: RadarDatabase, userId: string, input: unknown): Promise<ReadingAnnotation> {

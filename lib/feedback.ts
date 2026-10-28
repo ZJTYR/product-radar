@@ -1,5 +1,6 @@
 import type { RadarDatabase } from './database.ts';
 import type { InterestAction, ItemFeedback, SavedItem } from './types.ts';
+import { favoriteNoteInserts } from './favorite-notes.ts';
 
 type Statement = ReturnType<RadarDatabase['prepare']>;
 interface FeedbackRow extends ItemFeedback { version: string }
@@ -78,6 +79,7 @@ export async function undoFeedback(db: RadarDatabase,userId:string,token:string)
   else statements.push(db.prepare('DELETE FROM reading_feedback WHERE user_id=? AND item_id=?').bind(userId,entry.itemId));
   const savedVersion=await db.prepare('SELECT version FROM reading_favorite_versions WHERE user_id=? AND item_id=?').bind(userId,entry.itemId).first<{version:string}>();
   if (entry.autoFavoriteVersion && savedVersion?.version === entry.autoFavoriteVersion) statements.push(
+   ...await favoriteNoteInserts(db,userId,entry.itemId),
    db.prepare('DELETE FROM favorites WHERE user_id=? AND item_id=?').bind(userId,entry.itemId),
    favoriteVersion(db,userId,entry.itemId,crypto.randomUUID()),
   );
@@ -97,6 +99,7 @@ export async function saveFavorite(db:RadarDatabase,userId:string,value:{itemId:
  await mutate(db,userId,async()=> {
   await ensureItem(db,value.itemId);const at=new Date().toISOString();
   return {statements:[
+   ...await favoriteNoteInserts(db,userId,value.itemId),
    db.prepare('INSERT INTO favorites(user_id,item_id,collection,note,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,item_id) DO UPDATE SET collection=excluded.collection,note=excluded.note,updated_at=excluded.updated_at').bind(userId,value.itemId,value.collection,value.note,at,at),
    favoriteVersion(db,userId,value.itemId,crypto.randomUUID()),
   ],result:null};
@@ -105,7 +108,25 @@ export async function saveFavorite(db:RadarDatabase,userId:string,value:{itemId:
 }
 export async function removeFavorite(db:RadarDatabase,userId:string,itemId:string) {
  await mutate(db,userId,async()=>({statements:[
+  ...await favoriteNoteInserts(db,userId,itemId),
   db.prepare('DELETE FROM favorites WHERE user_id=? AND item_id=?').bind(userId,itemId),
   favoriteVersion(db,userId,itemId,crypto.randomUUID()),
  ],result:null}));
+}
+
+export async function updateFavoriteCollection(db:RadarDatabase,userId:string,value:{itemId:string;collection:string;expectedCollection:string}) {
+ await mutate(db,userId,async()=> {
+  const favorite=await db.prepare(favoriteSelect+' AND item_id=?').bind(userId,value.itemId).first<SavedItem>();
+  if (!favorite) throw new ReadingItemMissing('收藏已取消，请重新收藏后再分类');
+  if (favorite.collection!==value.expectedCollection && favorite.collection!==value.collection) throw new ReadingConflict('分类已在其他页面修改，请关闭后重新选择');
+  if (favorite.collection===value.collection) return {statements:[],result:null};
+  return {statements:[
+   ...await favoriteNoteInserts(db,userId,value.itemId),
+   db.prepare('UPDATE favorites SET collection=?,updated_at=? WHERE user_id=? AND item_id=?').bind(value.collection,new Date().toISOString(),userId,value.itemId),
+   favoriteVersion(db,userId,value.itemId,crypto.randomUUID()),
+  ],result:null};
+ });
+ const saved=await db.prepare(favoriteSelect+' AND item_id=?').bind(userId,value.itemId).first<SavedItem>();
+ if (!saved) throw new ReadingItemMissing('收藏已取消，请重新收藏后再分类');
+ return saved;
 }
