@@ -1,9 +1,10 @@
 export type AIApplication = 'agents' | 'knowledge' | 'multimodal' | 'integration' | 'engineering';
-export type ItemKind = 'product' | 'design' | 'ai';
+export type ItemKind = 'product' | 'design' | 'ai' | 'news';
+export type NewsTopic = 'technology' | 'product';
 export interface IntelImage { url: string; caption: string; sourceUrl: string }
 export interface SourceLink { label: string; url: string }
 export interface IntelItem {
-  id: string; kind: ItemKind; aiApplication?: AIApplication; name: string; title: string; subtitle: string;
+  id: string; kind: ItemKind; aiApplication?: AIApplication; newsTopic?: NewsTopic; name: string; title: string; subtitle: string;
   summary: string; category: string; tags: string[]; image?: string; imageCaption?: string; images?: IntelImage[];
   accent: string; website: string; github?: string; repo?: string;
   stars?: number | null; starsCheckedAt?: string; publishedAt?: string | null;

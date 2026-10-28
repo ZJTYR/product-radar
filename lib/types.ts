@@ -1,4 +1,5 @@
-export type ItemKind = 'product' | 'design' | 'ai';
+export type ItemKind = 'product' | 'design' | 'ai' | 'news';
+export type NewsTopic = 'technology' | 'product';
 export type AIApplication = 'agents' | 'knowledge' | 'multimodal' | 'integration' | 'engineering';
 export interface SourceLink { label: string; url: string }
 export interface IntelImage { url: string; caption: string; sourceUrl: string }
@@ -10,6 +11,7 @@ export interface IntelItem {
   discoveredAt: string; evidence: '官方资料' | '产品观察' | '官方发布';
   featured?: boolean; readMinutes: number;
   aiApplication?: AIApplication;
+  newsTopic?: NewsTopic;
   facts: string[]; audience: string; pain: string; workflow: string; scenario?: string;
   businessModel: string; differentiation: string; opportunity: string;
   designNotes: string[]; caveats: string[]; sources: SourceLink[];
