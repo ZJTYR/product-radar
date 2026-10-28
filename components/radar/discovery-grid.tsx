@@ -9,6 +9,8 @@ import type { InterestAction, RecommendationResult } from "./interest";
 export interface DiscoveryGridHandle { undo: (token: string) => void; reload: () => void; replaceDismissed: (itemId: string, token: string | null) => Promise<void> }
 interface UndoSlot { token: string; index: number; item: IntelItem; replacement: IntelItem | null; changed: boolean }
 interface Props {
+  refreshKey: string;
+  catalogItems: IntelItem[];
   excludedId?: string;
   blockedIds: Set<string>;
   savedIds: Set<string>;
@@ -25,7 +27,7 @@ interface Props {
 const SIZE = 8;
 const stars = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 
-export const DiscoveryGrid = forwardRef<DiscoveryGridHandle, Props>(function DiscoveryGrid({ excludedId, blockedIds, savedIds, disabled, ready, onOpen, onFeedback, getUndoToken, onUndo, renderVisual, onLibrary }, ref) {
+export const DiscoveryGrid = forwardRef<DiscoveryGridHandle, Props>(function DiscoveryGrid({ refreshKey, catalogItems, excludedId, blockedIds, savedIds, disabled, ready, onOpen, onFeedback, getUndoToken, onUndo, renderVisual, onLibrary }, ref) {
   const [scope, setScope] = useState<"products" | "github">("products");
   const [slots, setSlots] = useState<(IntelItem | null)[]>(Array(SIZE).fill(null));
   const [loading, setLoading] = useState(true);
@@ -43,10 +45,18 @@ export const DiscoveryGrid = forwardRef<DiscoveryGridHandle, Props>(function Dis
   const mountedRef = useRef(true);
   const initializedRef = useRef(false);
   const activeScopeRef = useRef(scope);
+  const activeRefreshRef = useRef(refreshKey);
   const undoRef = useRef<UndoSlot | null>(null);
   blockedRef.current = blockedIds; savedRef.current = savedIds; excludedRef.current = excludedId;
 
   const updateSlots = useCallback((next: (IntelItem | null)[]) => { slotsRef.current = next; setSlots(next); }, []);
+  useEffect(() => {
+    const byId = new Map(catalogItems.map(item => [item.id, item]));
+    const current = slotsRef.current;
+    const next = current.map(item => item ? byId.get(item.id) || item : null);
+    if (next.some((item, index) => item !== current[index])) updateSlots(next);
+    queueRef.current = queueRef.current.map(item => byId.get(item.id) || item);
+  }, [catalogItems, updateSlots]);
   const eligible = useCallback((item: IntelItem) => item.id !== excludedRef.current && !blockedRef.current.has(item.id) && !savedRef.current.has(item.id) && !seenRef.current.has(item.id), []);
 
   const fetchCandidates = useCallback(async () => {
@@ -98,11 +108,26 @@ export const DiscoveryGrid = forwardRef<DiscoveryGridHandle, Props>(function Dis
     return () => { mountedRef.current = false; invalidate(); };
   }, [invalidate]);
   useEffect(() => {
-    if (!ready || initializedRef.current && activeScopeRef.current === scope) return;
+    if (!ready || initializedRef.current && activeScopeRef.current === scope && activeRefreshRef.current === refreshKey) return;
     let active = true;
-    void Promise.resolve().then(() => { if (active) { initializedRef.current = true; activeScopeRef.current = scope; void startBatch(); } });
+    void Promise.resolve().then(() => { if (active) { initializedRef.current = true; activeScopeRef.current = scope; activeRefreshRef.current = refreshKey; void startBatch(); } });
     return () => { active = false; };
-  }, [ready, scope, startBatch]);
+  }, [ready, refreshKey, scope, startBatch]);
+
+  useEffect(() => {
+    if (!ready || !excludedId) return;
+    const index = slotsRef.current.findIndex(item => item?.id === excludedId);
+    if (index < 0) return;
+    const generation = generationRef.current;
+    let active = true;
+    void (async () => {
+      let replacement = takeCandidate();
+      if (!replacement) { await fetchCandidates(); replacement = takeCandidate(); }
+      if (!active || !mountedRef.current || generation !== generationRef.current || slotsRef.current[index]?.id !== excludedId) return;
+      const next = [...slotsRef.current]; next[index] = replacement; updateSlots(next);
+    })();
+    return () => { active = false; };
+  }, [excludedId, fetchCandidates, ready, takeCandidate, updateSlots]);
 
   useImperativeHandle(ref, () => ({
     reload: () => { if (!disabled) void startBatch(); },

@@ -189,7 +189,7 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
   }, [applyResult, feedbackReady, loadRecommendations, mutationLockRef, notify, recoverUncertainWrite]);
 
   const getUndoToken = useCallback(() => undoTokenRef.current, []);
-  return { getUndoToken, feedback, feedbackReady, feedbackError, recommendations, loading, error, busy, undoToken, submit, undo, restore, reconcile, loadRecommendations };
+  return { getUndoToken, feedback, feedbackReady, feedbackError, recommendations, loading, error, busy, undoToken, submit, undo, restore, reconcile, reloadState: reconcileLocked, loadRecommendations };
 }
 
 function DiscoveryImage({ item }: { item: IntelItem }) {

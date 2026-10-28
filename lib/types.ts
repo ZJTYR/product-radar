@@ -20,8 +20,12 @@ export type InterestAction = 'interested' | 'not_interested';
 export interface ItemFeedback { itemId: string; action: InterestAction; updatedAt: string }
 export interface ItemRead { itemId: string; readAt: string }
 export interface HistoryDay { date: string; count: number; updatedAt: string; status: string; readAt: string | null; hasUpdates: boolean }
+export interface FeedFreshness {
+ today: string; checkedAt: string; latestEditionDate: string; latestEditionUpdatedAt: string; latestEditionStatus: string;
+ lastStarsCheckedAt: string; lastStarsStatus: string;
+}
 export interface FeedResponse {
  items: IntelItem[];
- meta: { updatedAt: string; date: string; total: number; scheduleStatus: string; emailStatus: string; sourceCount: number; lastRunStatus: string; lastError?: string; editionItemIds?: string[]; emailConfigured?: boolean; };
+ meta: { updatedAt: string; date: string; total: number; scheduleStatus: string; emailStatus: string; sourceCount: number; lastRunStatus: string; freshness: FeedFreshness; lastError?: string; editionItemIds?: string[]; emailConfigured?: boolean; };
  user: { name: string; signedIn: boolean };
 }
