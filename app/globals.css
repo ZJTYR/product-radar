@@ -109,6 +109,7 @@ body.modal-open{overflow:hidden}
 .featured-card{display:grid;grid-template-columns:minmax(260px,.85fr) minmax(0,1.5fr);background:white;border:1px solid #e5eae1;border-radius:12px;overflow:hidden;box-shadow:0 2px 4px #26371b02}
 .featured-image{position:relative;display:block;text-align:left;overflow:hidden;background:#e7ece5;min-height:280px;padding:0}
 .visual{height:140px;position:relative;overflow:hidden;isolation:isolate}
+.visual-image{background:#edf1ed}
 .visual img{width:100%;height:100%;object-fit:cover;object-position:center;transition:transform .45s}
 .card-open:hover .visual img,.featured-image:hover .visual img{transform:scale(1.035)}
 .visual:after{content:"";position:absolute;inset:0;pointer-events:none;border:1px solid #10201604}
@@ -641,7 +642,7 @@ dialog{max-width:calc(100vw - 20px);max-height:calc(100dvh - 20px);border-radius
 .discovery-card:focus-visible{outline:3px solid #8fb9a4}
 .discovery-card.is-dragging{transition:none;user-select:none}
 .discovery-image{height:225px;background:#edf1ed;position:relative;border-bottom:1px solid #d7e1d8;overflow:hidden}
-.discovery-image img{width:100%;height:100%;object-fit:contain;pointer-events:none}
+.discovery-image img{width:100%;height:100%;object-fit:cover;object-position:center;pointer-events:none}
 .discovery-image>span{position:absolute;left:12px;bottom:11px;max-width:calc(100% - 24px);padding:4px 8px;font-size:11px;color:#2d4937;border:1px solid #c9d7c9;background:#ffffffed;border-radius:5px;line-height:1.6}
 .discovery-image-empty{height:130px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:9px;color:#3d5b46;background:linear-gradient(135deg,#e8f0e7,#f2f5ed)}
 .discovery-image-empty>span{position:static;border:0;background:none;padding:0;font-size:12px;color:#526154}
@@ -745,7 +746,7 @@ dialog{max-width:calc(100vw - 20px);max-height:calc(100dvh - 20px);border-radius
 .discovery-product-card.is-changing{opacity:.65}
 .discovery-product-card .card-open{display:flex;flex-direction:column;flex:1;min-height:0}
 .discovery-product-card .visual,.discovery-product-card .visual-empty{height:132px;min-height:132px;flex-shrink:0}
-.discovery-product-card .visual img{object-fit:contain}
+.discovery-product-card .visual img{object-fit:cover;object-position:center}
 .discovery-product-card .visual-fallback{min-height:132px;justify-content:center;padding:12px!important}
 .discovery-product-card .product-card-body{display:flex;flex-direction:column;flex:1;min-height:0;padding:11px 12px}
 .discovery-product-card .card-kicker{font-size:11px;gap:5px}

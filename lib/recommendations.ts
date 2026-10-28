@@ -1,5 +1,6 @@
 import type { IntelItem, ItemFeedback, ItemRead, SavedItem } from './types.ts';
-export type RecommendationScope='all'|'products'|'github'|'ai';
+import { FRONTIER_LIMIT, frontierLabel, selectFrontierItems } from './frontier.ts';
+export type RecommendationScope='all'|'products'|'github'|'ai'|'frontier';
 export interface RecommendationOptions {scope?:RecommendationScope;excludeIds?:string[];readItems?:ItemRead[]}
 type Feature={key:string;label:string;weight:number;topic:boolean};
 const normalize=(value:string)=>value.trim().toLocaleLowerCase();
@@ -18,6 +19,12 @@ export function recommendationFeatures(item:IntelItem):Feature[] {
  return [...new Map(features.map(feature=>[feature.key,feature])).values()];
 }
 export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorites:SavedItem[],limit=12,at=Date.now(),options:RecommendationOptions={}) {
+ if(options.scope==='frontier') {
+  const readIds=new Set((options.readItems||[]).map(entry=>entry.itemId));
+  const blockedIds=new Set([...(options.excludeIds||[]),...feedback.filter(entry=>entry.action==='not_interested').map(entry=>entry.itemId)]);
+  const result=selectFrontierItems(items,at,readIds,blockedIds,Math.min(limit,FRONTIER_LIMIT));
+  return {...result,reasons:Object.fromEntries(result.items.map(item=>[item.id,`近七天${frontierLabel(item)}${readIds.has(item.id)?' · 已读回看':''}`])),feedbackCount:feedback.length,profile:{positiveTopics:[],negativeTopics:[]}};
+ }
  const byId=new Map(items.map(item=>[item.id,item]));const choices=new Map(feedback.map(entry=>[entry.itemId,entry.action]));
  const scope=options.scope||'all';const excluded=new Set([...(options.excludeIds||[]),...(options.readItems||[]).map(entry=>entry.itemId)]);
  const saved=new Set(favorites.map(entry=>entry.itemId));const weights=new Map<string,number>();const labels=new Map<string,string>();

@@ -7,7 +7,7 @@ const imageUrl = z.string().max(2000).refine(v => /^\/images\/[A-Za-z0-9_.\/-]+$
 export const imageSchema = z.object({ url: imageUrl, caption: z.string().trim().min(1).max(300), sourceUrl: httpUrl }).strict();
 const imageGallerySchema = z.array(imageSchema).max(50).refine(images => new Set(images.map(image => image.url)).size === images.length, '图集不能重复图片 URL');
 export const itemSchema = z.object({
- id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), kind: z.enum(['product', 'design', 'ai']), name: text, title: text, subtitle: text,
+ id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), kind: z.enum(['product', 'design', 'ai', 'news']), newsTopic: z.enum(['technology', 'product']).optional(), name: text, title: text, subtitle: text,
  summary: text, category: text, tags: z.array(z.string().max(80)).max(30), image: imageUrl.optional(), images: imageGallerySchema.optional(),
  imageCaption: z.string().trim().min(1).max(300).optional(), scenario: text.optional(),
  accent: z.string().regex(/^#(?:[a-fA-F0-9]{3}|[a-fA-F0-9]{6}|[a-fA-F0-9]{8})$/), website: httpUrl, github: httpUrl.optional(), repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional(),
@@ -16,7 +16,10 @@ export const itemSchema = z.object({
  aiApplication: z.enum(['agents', 'knowledge', 'multimodal', 'integration', 'engineering']).optional(),
  facts: z.array(text).min(1).max(30), audience: text, pain: text, workflow: text, businessModel: text, differentiation: text, opportunity: text,
  designNotes: z.array(text).max(30), caveats: z.array(text).max(30), sources: z.array(z.object({ label: text, url: httpUrl })).min(1).max(30),
-}).strict();
+}).strict().superRefine((item, ctx) => {
+ if (item.kind === 'news' && !item.newsTopic) ctx.addIssue({code:'custom',path:['newsTopic'],message:'科技或产品新闻须填写新闻分类'});
+ if (item.kind === 'news' && !item.publishedAt) ctx.addIssue({code:'custom',path:['publishedAt'],message:'新闻须保留核验后的实际发布日期'});
+});
 export const catalogSchema = z.object({ items: z.array(itemSchema).min(1).max(50) }).strict().superRefine((value, ctx) => {
  if (new Set(value.items.map(item => item.id)).size !== value.items.length) ctx.addIssue({ code: 'custom', message: '产品库批次不能重复 item id' });
 });
@@ -30,7 +33,7 @@ export const feedbackItemIdSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 export const feedbackSchema = z.object({ itemId: feedbackItemIdSchema, action: z.enum(['interested', 'not_interested']) }).strict();
 export const undoSchema = z.object({ undoToken: z.string().uuid() }).strict();
 export const recommendationLimitSchema = z.coerce.number().int().min(1).max(30).default(12);
-export const recommendationScopeSchema = z.enum(['all', 'products', 'github', 'ai']).default('all');
+export const recommendationScopeSchema = z.enum(['all', 'products', 'github', 'ai', 'frontier']).default('all');
 export const recommendationExcludeSchema = z.string().max(5049).default('').transform(value => value ? value.split(',') : []).pipe(z.array(feedbackItemIdSchema).max(50)).transform(value => [...new Set(value)]);
 export const itemReadSchema = z.object({ itemId: feedbackItemIdSchema }).strict();
 export const editionReadSchema = z.object({ date: dateSchema, read: z.boolean(), version: timestamp.optional() }).strict().superRefine((value, ctx) => {
