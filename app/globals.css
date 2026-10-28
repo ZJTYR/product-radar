@@ -219,9 +219,6 @@ body.modal-open{overflow:hidden}
 .saved-grid .design-card-body{padding:16px 17px}
 .saved-grid .design-card h3{font-size:15px}
 .saved-grid .design-highlights{display:none}
-.saved-note{width:100%;display:flex;gap:9px;align-items:center;background:#edf3e7;border:1px solid #e0e8d8;border-top:0;padding:12px;border-radius:0 0 8px 8px;text-align:left;font-size:12px;color:#526154}
-.saved-note>span{flex:1;min-width:0;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
-.saved-note strong{display:block;font-weight:500;font-size:12px;margin-bottom:4px;color:#526154}
 .history-section{margin-bottom:20px}
 .history-days{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .history-day{border:1px solid #e0e7d8;background:#fff;border-radius:8px;display:flex;align-items:center;gap:10px;padding:17px;font-size:12px;color:#526154;text-align:left}
@@ -360,14 +357,10 @@ dialog::backdrop{background:#1b2e255e;backdrop-filter:blur(5px)}
 .sources-section>a:hover{background:#f2f7ec;border-color:#c5d6b4}
 .sources-section>a>span{min-width:0}
 .sources-section small{display:block;font-size:12px;color:#526154;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:540px}
-.note-editor{margin-top:31px;background:#f0f5e9;border:1px solid #dfe8d3;padding:22px;border-radius:9px}
-.note-editor>div{display:flex;gap:9px;align-items:center;color:#526154;margin-bottom:18px}
 label{display:block;font-size:13px;color:#526154}
 label input,label textarea{display:block;width:100%;border:1px solid #aabfa5;background:#fff;border-radius:6px;font-size:14px;color:#5b7447;padding:10px 12px;margin-top:8px;outline-color:#94ac7d}
 label input::placeholder,label textarea::placeholder{color:#526154}
 label textarea{resize:vertical;line-height:1.9;min-height:90px}
-.note-editor label+label{margin-top:17px}
-.note-editor>.button{margin-top:15px}
 .settings-dialog{width:470px}
 .settings-form{min-height:0;padding:22px 26px 26px;overflow-y:auto;overscroll-behavior:contain}
 .settings-icon{height:51px;width:51px;border-radius:14px;background:#eaf3df;color:#526154;display:grid;place-items:center;margin-bottom:22px}
@@ -519,8 +512,6 @@ to{opacity:1}
 .saved-grid{gap:12px}
 .saved-grid .visual,.saved-grid .design-card .visual{height:120px}
 .saved-grid .design-card-body{padding:11px 12px}
-.saved-note{font-size:12px;padding:11px}
-.saved-note strong{font-size:12px}
 .history-day{padding:12px 10px;gap:7px;flex-wrap:wrap}
 .history-day>strong{font-size:13px}
 .history-day>span{font-size:12px}
@@ -562,10 +553,6 @@ dialog{max-width:calc(100vw - 20px);max-height:calc(100dvh - 20px);border-radius
 .caveats li{font-size:14px}
 .sources-section>a{font-size:13px;padding:12px}
 .sources-section small{font-size:12px;max-width:100%;overflow-wrap:anywhere;white-space:normal}
-.note-editor{padding:16px;margin-top:20px}
-.note-editor h4{font-size:14px}
-.note-editor label{font-size:13px}
-.note-editor input,.note-editor textarea{font-size:14px}
 .settings-form{padding:22px}
 .settings-form h2{font-size:22px}
 .settings-form>p{font-size:14px}
@@ -921,3 +908,24 @@ dialog{max-width:calc(100vw - 20px);max-height:calc(100dvh - 20px);border-radius
  .annotation-editor-content>textarea{font-size:16px;min-height:145px}
  .annotation-editor-footer{padding:12px 15px}
 }
+
+/* 收藏分类使用轻量入口，文字记录统一进入笔记。 */
+.saved-item-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#f7f9f5;border:1px solid #dfe6dc;border-top:0;border-radius:0 0 8px 8px;padding:10px 12px}
+.collection-trigger{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:240px;border:1px solid #d4ddcf;border-radius:6px;padding:7px 9px;background:#fff;color:#50614f;font-size:12px;text-align:left}
+.collection-trigger span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.collection-trigger svg{flex-shrink:0}
+.saved-item-tools .collection-trigger{border:0;padding:4px 0;background:transparent;flex:1}
+.saved-notes-trigger{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;font-size:12px;color:#50614f;padding:5px 0}
+.collection-dialog{width:min(440px,calc(100vw - 28px));max-height:calc(100dvh - 32px);padding:0;border:1px solid #d8dfd3;border-radius:12px;background:#fff;color:#33473b;box-shadow:0 20px 70px #17261730;overflow:auto}
+.collection-dialog::backdrop{background:#17261766}
+.collection-dialog .dialog-top{position:static;padding:16px 20px;border-bottom:1px solid #e8ece4}
+.collection-editor-content{padding:18px 20px}
+.collection-editor-content>p:first-child{font-size:13px;color:#73806f;margin:0 0 16px}
+.collection-editor-content label{display:block;font-size:13px;margin-bottom:7px}
+.collection-editor-content input{width:100%;border:1px solid #bdcbb4;border-radius:6px;padding:10px 12px;font-size:15px;background:#fff}
+.collection-options{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px;max-height:180px;overflow:auto}
+.collection-options button{max-width:100%;overflow-wrap:anywhere;border:1px solid #dfe6d8;border-radius:5px;padding:5px 8px;font-size:12px;background:#f5f7f2}
+.collection-options button[aria-pressed=true]{background:#e4eedc;border-color:#93ae82;color:#2f5539}
+.collection-dialog footer{display:flex;justify-content:flex-end;gap:9px;padding:0 20px 20px}
+.collection-error{color:#9b3b32;font-size:13px;line-height:1.6;margin-top:12px}
+@media(max-width:760px){.detail-links .collection-trigger{max-width:100%;}.collection-editor-content input{font-size:16px}.saved-item-tools{padding:9px 10px;gap:7px}}

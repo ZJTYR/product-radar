@@ -8,6 +8,8 @@ import { RadarDatabase } from '../lib/database.ts';
 import { seedItems } from '../lib/seed.ts';
 import { createAnnotationAnchor, getAnnotationBlocks } from '../lib/annotations.ts';
 import { AnnotationError, createAnnotation, listAnnotations, updateAnnotation } from '../lib/annotation-store.ts';
+import { saveFavorite, removeFavorite, updateFavoriteCollection } from '../lib/feedback.ts';
+import { exportNotesMarkdown } from '../lib/annotations.ts';
 import { annotationCreateSchema, annotationUpdateSchema } from '../lib/annotation-validation.ts';
 
 const at = '2026-10-26T00:30:00.000Z';
@@ -27,8 +29,8 @@ async function fixture(run) {
     await db.batch([
       db.prepare('INSERT INTO intel_items(id,payload,updated_at) VALUES(?,?,?)').bind(item.id, JSON.stringify(item), at),
       db.prepare('INSERT INTO editions(date,payload,updated_at,status) VALUES(?,?,?,?)').bind('2026-10-26', JSON.stringify([historical]), at, 'complete'),
-      db.prepare('INSERT INTO favorites(user_id,item_id,collection,note,created_at,updated_at) VALUES(?,?,?,?,?,?)').bind('owner', item.id, '工作流', '已有收藏备注', at, at),
-      db.prepare('INSERT INTO favorites(user_id,item_id,collection,note,created_at,updated_at) VALUES(?,?,?,?,?,?)').bind('other', item.id, '私人分类', '另一个用户的备注', at, at),
+      db.prepare('INSERT INTO favorites(user_id,item_id,collection,note,created_at,updated_at) VALUES(?,?,?,?,?,?)').bind('owner', item.id, '工作流', '', at, at),
+      db.prepare('INSERT INTO favorites(user_id,item_id,collection,note,created_at,updated_at) VALUES(?,?,?,?,?,?)').bind('other', item.id, '私人分类', '', at, at),
     ]);
     await run(db, path);
   } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
@@ -114,16 +116,19 @@ test('soft deletion can be undone with its version while content and quote remai
   assert.deepEqual((await listAnnotations(db, 'owner')).notes, [restored]);
 }));
 
-test('plain thoughts and highlights keep their own requirements, and old favorite notes are readable without migration', async () => fixture(async db => {
+test('plain thoughts and highlights keep their own requirements, while old favorite notes become editable notes', async () => fixture(async db => {
+  await db.prepare('UPDATE favorites SET note=? WHERE user_id=?').bind('已有收藏备注', 'owner').run();
+  await db.prepare('UPDATE favorites SET note=? WHERE user_id=?').bind('另一个用户的备注', 'other').run();
   const thought = await createAnnotation(db, 'owner', requestFor({ anchors: [], body: '不针对某段文字的整体想法' }));
   assert.equal(thought.quote, ''); assert.equal(thought.anchors.length, 0);
   await assert.rejects(updateAnnotation(db, 'owner', { id: thought.id, version: thought.version, body: ' \n ' }), hasStatus(400));
   const highlight = await createAnnotation(db, 'owner', requestFor({ body: '' }));
   assert.ok(highlight.quote); assert.equal(highlight.body, '');
   const state = await listAnnotations(db, 'owner');
-  assert.equal(state.notes.length, 2); assert.equal(state.favoriteNotes.length, 1);
-  assert.equal(state.favoriteNotes[0].body, '已有收藏备注'); assert.equal(state.favoriteNotes[0].itemName, item.name);
-  assert.equal((await listAnnotations(db, 'other')).favoriteNotes[0].body, '另一个用户的备注');
+  assert.equal(state.notes.length, 3); assert.equal(state.favoriteNotes.length, 0);
+  const imported = state.notes.find(note => note.body === '已有收藏备注');
+  assert.equal(imported.itemName, item.name);
+  assert.equal((await listAnnotations(db, 'other')).notes[0].body, '另一个用户的备注');
   await db.prepare('UPDATE favorites SET note=? WHERE user_id=? AND item_id=?').bind(' \n\t ', 'owner', item.id).run();
   assert.deepEqual((await listAnnotations(db, 'owner')).favoriteNotes, []);
 }));
@@ -157,3 +162,65 @@ test('annotation input rejects forged identities, unbounded quotes, duplicate bl
   assert.equal(annotationUpdateSchema.safeParse({ id: good.id, version: randomUUID() }).success, false);
   assert.equal(annotationUpdateSchema.safeParse({ id: good.id, version: 'bad-version', body: '想法' }).success, false);
 });
+
+
+test('favorite note import preserves content, product and original times across concurrent reads; edits and deletions are never replayed', async () => fixture(async (db, path) => {
+  await db.prepare('UPDATE favorites SET note=? WHERE user_id=?').bind('原有备注\n保持换行与空格 ', 'owner').run();
+  const second = new RadarDatabase(undefined, path);
+  try {
+    await Promise.all([listAnnotations(db, 'owner'), listAnnotations(second, 'owner')]);
+    const first = await listAnnotations(db, 'owner');
+    assert.equal(first.notes.length, 1); assert.deepEqual(first.favoriteNotes, []);
+    const imported = first.notes[0];
+    assert.equal(imported.body, '原有备注\n保持换行与空格 ');
+    assert.equal(imported.createdAt, at); assert.equal(imported.updatedAt, at);
+    assert.equal(imported.itemId, item.id); assert.equal(imported.itemName, item.name); assert.equal(imported.itemUrl, item.website);
+    const edited = await updateAnnotation(db, 'owner', { id: imported.id, version: imported.version, body: '统一编辑后的想法' });
+    assert.deepEqual((await listAnnotations(second, 'owner')).notes, [edited]);
+    const output = exportNotesMarkdown([edited], []);
+    assert.equal(output.split('统一编辑后的想法').length, 2); assert.ok(!output.includes('原有备注'));
+    const deleted = await updateAnnotation(db, 'owner', { id: edited.id, version: edited.version, deleted: true });
+    assert.deepEqual((await listAnnotations(db, 'owner')).notes, []);
+    const restored = await updateAnnotation(db, 'owner', { id: deleted.id, version: deleted.version, deleted: false });
+    assert.equal((await listAnnotations(second, 'owner')).notes[0].body, restored.body);
+    assert.equal((await db.prepare('SELECT note FROM favorites WHERE user_id=?').bind('owner').first()).note, imported.body);
+  } finally { second.close(); }
+}));
+
+test('removing a favorite before opening the notebook preserves its old remark as an independent editable note', async () => fixture(async db => {
+  await db.prepare('UPDATE favorites SET note=? WHERE user_id=?').bind('取消收藏也不能丢的备注', 'owner').run();
+  await removeFavorite(db, 'owner', item.id);
+  assert.equal(await db.prepare('SELECT item_id FROM favorites WHERE user_id=?').bind('owner').first(), null);
+  const imported = (await listAnnotations(db, 'owner')).notes[0];
+  assert.equal(imported.body, '取消收藏也不能丢的备注'); assert.equal(imported.createdAt, at);
+  const edited = await updateAnnotation(db, 'owner', { id: imported.id, version: imported.version, body: '取消收藏后继续编辑' });
+  assert.equal(edited.body, '取消收藏后继续编辑');
+  await saveFavorite(db, 'owner', { itemId: item.id, collection: '重新收藏', note: '' });
+  assert.deepEqual((await listAnnotations(db, 'owner')).notes, [edited]);
+}));
+
+test('collection-only saves preserve remarks and note timestamps and reject stale editors or cancelled favorites', async () => fixture(async db => {
+  await db.prepare('UPDATE favorites SET note=? WHERE user_id=?').bind('分类修改前的备注', 'owner').run();
+  const moved = await updateFavoriteCollection(db, 'owner', { itemId: item.id, collection: '值得试用', expectedCollection: '工作流' });
+  assert.equal(moved.collection, '值得试用'); assert.equal(moved.note, '分类修改前的备注'); assert.equal(moved.createdAt, at);
+  const imported = (await listAnnotations(db, 'owner')).notes[0];
+  assert.equal(imported.updatedAt, at);
+  assert.equal((await updateFavoriteCollection(db, 'owner', { itemId: item.id, collection: '值得试用', expectedCollection: '工作流' })).collection, '值得试用');
+  await assert.rejects(updateFavoriteCollection(db, 'owner', { itemId: item.id, collection: '过期修改', expectedCollection: '工作流' }), /分类已在其他页面修改/);
+  assert.equal((await db.prepare('SELECT collection FROM favorites WHERE user_id=?').bind('other').first()).collection, '私人分类');
+  await removeFavorite(db, 'owner', item.id);
+  await assert.rejects(updateFavoriteCollection(db, 'owner', { itemId: item.id, collection: '误恢复', expectedCollection: '值得试用' }), /收藏已取消/);
+  assert.deepEqual((await listAnnotations(db, 'owner')).notes, [imported]);
+}));
+
+test('old clients cannot erase an earlier remark when saving a different one, and imports keep edited snapshots', async () => fixture(async db => {
+  await db.prepare('UPDATE favorites SET note=? WHERE user_id=?').bind('旧版第一条备注', 'owner').run();
+  await saveFavorite(db, 'owner', { itemId: item.id, collection: '工作流', note: '旧客户端补充的备注' });
+  const notes = (await listAnnotations(db, 'owner')).notes;
+  assert.deepEqual(notes.map(note => note.body).sort(), ['旧版第一条备注', '旧客户端补充的备注'].sort());
+  const first = notes.find(note => note.body === '旧版第一条备注');
+  await updateAnnotation(db, 'owner', { id: first.id, version: first.version, body: '已编辑的新内容' });
+  await saveFavorite(db, 'owner', { itemId: item.id, collection: '工作流', note: '旧版第一条备注' });
+  const refreshed = (await listAnnotations(db, 'owner')).notes;
+  assert.equal(refreshed.length, 2); assert.ok(refreshed.some(note => note.body === '已编辑的新内容'));
+}));
