@@ -1,6 +1,21 @@
 import { database, currentUser, route, json, checkMutation, body, emailConfigured, HttpError } from '@/lib/server';
 import { preferenceSchema } from '@/lib/validation';
 import { emailReadiness } from '@/lib/email-smtp';
+import { DEFAULT_DELIVERY_TIME } from '@/lib/email-timing';
+import { emailScheduleStatus, saveEmailPreferences, storedEmailPreferences } from '@/lib/email-schedule-store';
 export const dynamic = 'force-dynamic';
-export function GET() { return route(async()=> { const user=await currentUser(); const row=await database().prepare('SELECT email,delivery_time as "deliveryTime",email_enabled as "emailEnabled" FROM preferences WHERE user_id=?').bind(user.userId).first<{email:string,deliveryTime:string,emailEnabled:number}>(); return json({preferences:row?{...row,deliveryTime:'08:30',emailEnabled:Boolean(row.emailEnabled)&&emailConfigured()}:{email:user.email,deliveryTime:'08:30',emailEnabled:false},emailConfigured:emailConfigured(),...emailReadiness()}); }); }
-export function PUT(request: Request) { return route(async()=> { checkMutation(request); const user=await currentUser(); const input=preferenceSchema.parse(await body(request)); const prefs={...input,deliveryTime:'08:30'}; if(prefs.emailEnabled&&!emailConfigured()) throw new HttpError(409,'SMTP 发信配置尚未完整，暂不能开启每日邮件'); await database().prepare('INSERT INTO preferences(user_id,email,delivery_time,email_enabled) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET email=excluded.email,delivery_time=excluded.delivery_time,email_enabled=excluded.email_enabled').bind(user.userId,prefs.email,prefs.deliveryTime,Number(prefs.emailEnabled)).run(); return json({preferences:prefs,emailConfigured:emailConfigured(),...emailReadiness()}); }); }
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+export function GET() { return route(async()=> {
+ const user=await currentUser();
+ const preferences=await storedEmailPreferences(database(),user.userId) || {email:user.email,deliveryTime:DEFAULT_DELIVERY_TIME,emailEnabled:false};
+ return json({preferences,emailConfigured:emailConfigured(),...emailReadiness(),schedule:await emailScheduleStatus(database(),user.userId,{inspect:true})});
+}); }
+export function PUT(request: Request) { return route(async()=> {
+ checkMutation(request);
+ const user=await currentUser();
+ const prefs=preferenceSchema.parse(await body(request));
+ if(prefs.emailEnabled&&!emailConfigured()) throw new HttpError(409,'SMTP 发信配置尚未完整，暂不能开启每日邮件');
+ const schedule=await saveEmailPreferences(database(),user.userId,prefs);
+ return json({preferences:await storedEmailPreferences(database(),user.userId) || prefs,emailConfigured:emailConfigured(),...emailReadiness(),schedule});
+}); }

@@ -1,6 +1,7 @@
 import { route, json, checkMutation, body, initialize, saveEdition, database, shanghaiDate, HttpError, currentUser } from '@/lib/server';
 import { ingestSchema } from '@/lib/validation';
 import { sendDailyEmail, EmailDeliveryError } from '@/lib/email-store';
+import { ensureEmailSchedule } from '@/lib/email-schedule-store';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -18,10 +19,15 @@ export function POST(request: Request) { return route(async()=> {
  }
  const updatedAt=await saveEdition(value.date,value.items,value.status,'ingest');
  // 数据已成功保存。邮件的拒绝或不确定结果独立返回，不能导致采集方覆盖重放简报。
- let email: unknown = { skipped:true,reason:'完整简报完成后才发送邮件。' };
+ let email: unknown = { skipped:true,reason:'等待当天完整简报及设定发送时间。' };
+ let emailSchedule: unknown;
  if(value.status==='complete') {
-  try { const user=await currentUser(); email=await sendDailyEmail(database(),user.userId,value.date); }
+  try {
+   const user=await currentUser();
+   email=await sendDailyEmail(database(),user.userId,value.date);
+   emailSchedule=await ensureEmailSchedule(database(),user.userId);
+  }
   catch(error) { email=error instanceof EmailDeliveryError ? {skipped:true,reason:error.message} : {status:'unknown',message:'简报已保存，邮件结果暂时无法核对，请在偏好设置查看投递记录。'}; }
  }
- return json({ok:true,date:value.date,count:value.items.length,status:value.status,updatedAt,email});
+ return json({ok:true,date:value.date,count:value.items.length,status:value.status,updatedAt,email,...(emailSchedule?{emailSchedule}:{})});
 }); }
