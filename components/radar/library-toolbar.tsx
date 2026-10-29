@@ -1,0 +1,10 @@
+import type { RadarLocation } from '@/lib/radar-navigation';
+export function LibraryToolbar({location,categories,count,readReady,onChange}:{location:RadarLocation;categories:string[];count:number;readReady:boolean;onChange:(patch:Partial<RadarLocation>)=>void}) {
+  const frontier=location.view==='frontier';
+  return <section className="library-toolbar" aria-label="资料筛选"><div className="filter-grid">
+    {frontier ? <label>主题<select aria-label="前沿主题" value={location.topic} onChange={event=>onChange({topic:event.target.value as RadarLocation['topic']})}><option value="all">全部主题</option><option value="ai">AI 应用</option><option value="technology">科技动态</option><option value="product">产品热点</option></select></label> : <label>行业 / 分类<select aria-label="资料分类" value={location.category} onChange={event=>onChange({category:event.target.value})}><option value="">全部分类</option>{categories.map(category=><option key={category}>{category}</option>)}</select></label>}
+    <label>阅读状态<select aria-label="资料阅读状态" disabled={!readReady} value={location.read} onChange={event=>onChange({read:event.target.value as RadarLocation['read']})}><option value="all">全部状态</option><option value="unread">未读</option><option value="read">已读</option></select></label>
+    {frontier && <label>发布日期<select aria-label="前沿日期范围" value={location.range} onChange={event=>onChange({range:event.target.value as RadarLocation['range']})}><option value="all">全部日期</option><option value="7">最近 7 天</option><option value="30">最近 30 天</option></select></label>}
+    <label>排序<select aria-label="资料排序" value={location.sort} onChange={event=>onChange({sort:event.target.value as RadarLocation['sort']})}><option value="recent">最近收录</option>{frontier ? <option value="published">最近发布</option> : <><option value="name">名称</option><option value="stars">GitHub 关注度</option></>}</select></label>
+  </div><div className="result-count" role="status">{location.read !== "all" && !readReady ? "阅读状态尚未核对" : `找到 ${count} 条资料`}<button className="text-link" onClick={()=>onChange({query:'',category:'',read:'all',topic:'all',range:'all',sort:'recent'})}>重置筛选</button></div></section>;
+}

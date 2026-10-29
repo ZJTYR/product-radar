@@ -8,6 +8,8 @@ const schema = [
  'CREATE TABLE IF NOT EXISTS editions (date TEXT PRIMARY KEY,payload TEXT NOT NULL,updated_at TEXT NOT NULL,status TEXT NOT NULL)',
  'CREATE TABLE IF NOT EXISTS favorites (user_id TEXT NOT NULL,item_id TEXT NOT NULL,collection TEXT NOT NULL,note TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(user_id,item_id))',
  'CREATE TABLE IF NOT EXISTS preferences (user_id TEXT PRIMARY KEY,email TEXT NOT NULL,delivery_time TEXT NOT NULL,email_enabled INTEGER NOT NULL DEFAULT 0)',
+ "CREATE TABLE IF NOT EXISTS email_deliveries (id TEXT PRIMARY KEY,user_id TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('daily','test')),dedupe_key TEXT NOT NULL,edition_date TEXT NOT NULL,edition_version TEXT NOT NULL,recipient TEXT NOT NULL,payload TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('pending','sending','accepted','failed','unknown')),request_id TEXT NOT NULL,message_id TEXT NOT NULL,claim_token TEXT,attempt_count INTEGER NOT NULL DEFAULT 0,error_message TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(user_id,kind,dedupe_key),UNIQUE(user_id,kind,request_id))",
+ 'CREATE INDEX IF NOT EXISTS email_deliveries_owner_updated ON email_deliveries(user_id,updated_at)',
  'CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY,kind TEXT NOT NULL,status TEXT NOT NULL,detail TEXT NOT NULL,created_at TEXT NOT NULL)',
  'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL)',
  'CREATE TABLE IF NOT EXISTS reading_state (user_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0 CONSTRAINT reading_revision_nonnegative CHECK(revision>=0))',
