@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { EmailReadiness } from './email-types.ts';
 
-export interface EmailMessage { subject: string; text: string; html: string }
+export interface InlinePosterAttachment { filename: string; contentType: 'image/png'; contentBase64: string; cid: string }
+export interface EmailMessage { subject: string; text: string; html: string; templateVersion?: string; attachments?: InlinePosterAttachment[] }
 export interface EmailEnvelope extends EmailMessage { recipient: string; messageId: string }
 export interface EmailSendResult { messageId: string; accepted: boolean }
 export type EmailSender = (message: EmailEnvelope) => Promise<EmailSendResult>;
@@ -20,11 +21,24 @@ function smtpConfig(env: SmtpEnvironment) {
 }
 
 export function emailReadiness(env: SmtpEnvironment = process.env): EmailReadiness {
-  return { deliveryReady: Boolean(smtpConfig(env)), deliveryMode: 'after_update', deliveryReason: smtpConfig(env) ? '每日简报完成后发送；同一天只发送一份。' : 'SMTP 发信配置尚未完整，请先完成服务端配置。' };
+  return { deliveryReady: Boolean(smtpConfig(env)), deliveryMode: 'scheduled', deliveryReason: smtpConfig(env) ? '按保存的北京时间定时发送热点海报，默认 20:00；同一天只发送一份。' : 'SMTP 发信配置尚未完整，请先完成服务端配置。' };
+}
+
+/** 附件只接受内存中的 PNG，绝不把冻结 JSON 当作文件路径或远端 URL。 */
+export function inlinePosterAttachments(message: EmailMessage) {
+  if (!message.attachments) return [];
+  if (message.attachments.length !== 1) throw Object.assign(new Error('Invalid poster attachment count'), { code: 'EPOSTER' });
+  return message.attachments.map(value => {
+    if (!value || value.contentType !== 'image/png' || !/^[a-zA-Z0-9._-]+\.png$/.test(value.filename) || !/^[a-zA-Z0-9._-]+@product-radar\.local$/.test(value.cid) || typeof value.contentBase64 !== 'string' || value.contentBase64.length > 7_000_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value.contentBase64)) throw Object.assign(new Error('Invalid poster attachment'), { code: 'EPOSTER' });
+    const content = Buffer.from(value.contentBase64, 'base64');
+    if (content.length < 24 || content.toString('base64') !== value.contentBase64 || !content.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) || content.readUInt32BE(16) > 4000 || content.readUInt32BE(20) > 12000) throw Object.assign(new Error('Invalid poster PNG'), { code: 'EPOSTER' });
+    return { filename: value.filename, content, contentType: value.contentType, cid: value.cid, contentDisposition: 'inline' as const };
+  });
 }
 
 /** 只使用服务端配置；保留 TLS 校验，不读取 URL 或文件附件。 */
 export const sendSmtp: EmailSender = async message => {
+  const attachments = inlinePosterAttachments(message);
   const config = smtpConfig(process.env);
   if (!config) throw Object.assign(new Error('SMTP configuration missing'), { code: 'ECONFIG' });
   const { default: nodemailer } = await import('nodemailer');
@@ -40,7 +54,7 @@ export const sendSmtp: EmailSender = async message => {
     const result = await transport.sendMail({
       from: { name: '拾光', address: config.from }, to: message.recipient,
       replyTo: config.from, subject: message.subject, text: message.text, html: message.html,
-      messageId: message.messageId,
+      messageId: message.messageId, attachments,
     });
     return { messageId: result.messageId || message.messageId, accepted: result.accepted.some(value => String(value).toLowerCase() === message.recipient.toLowerCase()) };
   } finally { transport.close(); }
@@ -52,9 +66,9 @@ export function smtpFailure(error: unknown): { status: 'failed' | 'unknown'; mes
   const command = (value.command || '').toUpperCase();
   const explicitlyRejected = command !== 'QUIT' && typeof value.responseCode === 'number' && value.responseCode >= 400 && value.responseCode < 600;
   const beforeData = /^(CONN|EHLO|HELO|STARTTLS|AUTH(?: |$)|MAIL FROM|RCPT TO)/.test(command);
-  const locallyRejected = ['ECONFIG', 'EAUTH', 'ENOAUTH', 'EOAUTH2', 'EDNS', 'ETLS', 'EREQUIRETLS', 'EENVELOPE', 'EMAXRECIPIENTS', 'EFILEACCESS', 'EURLACCESS'].includes(value.code || '');
+  const locallyRejected = ['ECONFIG', 'EAUTH', 'ENOAUTH', 'EOAUTH2', 'EDNS', 'ETLS', 'EREQUIRETLS', 'EENVELOPE', 'EMAXRECIPIENTS', 'EFILEACCESS', 'EURLACCESS', 'EPOSTER'].includes(value.code || '');
   if (explicitlyRejected || beforeData || locallyRejected) {
-    const message = value.code === 'EAUTH' || value.code === 'ENOAUTH' ? 'SMTP 登录失败，请核对邮箱授权码和服务开关。' : value.code === 'ECONFIG' ? 'SMTP 发信配置尚未完整。' : '发信服务明确拒绝或尚未开始接收邮件；处理原因后可重试。';
+    const message = value.code === 'EAUTH' || value.code === 'ENOAUTH' ? 'SMTP 登录失败，请核对邮箱授权码和服务开关。' : value.code === 'ECONFIG' ? 'SMTP 发信配置尚未完整。' : value.code === 'EPOSTER' ? '海报附件无效，邮件尚未发送。' : '发信服务明确拒绝或尚未开始接收邮件；处理原因后可重试。';
     return { status: 'failed', message };
   }
   return { status: 'unknown', message: '发送结果暂不确定，请先查收或检查邮箱发信记录；系统不会自动重发。' };

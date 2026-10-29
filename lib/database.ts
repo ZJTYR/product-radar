@@ -12,6 +12,11 @@ const schema = [
  'CREATE INDEX IF NOT EXISTS email_deliveries_owner_updated ON email_deliveries(user_id,updated_at)',
  'CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY,kind TEXT NOT NULL,status TEXT NOT NULL,detail TEXT NOT NULL,created_at TEXT NOT NULL)',
  'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL)',
+ "CREATE TABLE IF NOT EXISTS email_schedules (user_id TEXT PRIMARY KEY,generation TEXT NOT NULL,run_id TEXT NOT NULL DEFAULT '',delivery_time TEXT NOT NULL,recipient TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('starting','scheduled','paused','waiting','error')),next_run_at TEXT,deployment_id TEXT NOT NULL DEFAULT '',error_message TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL)",
+ // 唯一 marker 先取得行锁，多个 Neon 实例初始化时串行完成这次兼容迁移。
+ "INSERT INTO settings(key,value,updated_at) VALUES('email_schedule_v1_migration','pending',CURRENT_TIMESTAMP) ON CONFLICT(key) DO NOTHING",
+ "UPDATE preferences SET delivery_time='20:00' WHERE delivery_time='08:30' AND EXISTS(SELECT 1 FROM settings WHERE key='email_schedule_v1_migration' AND value='pending')",
+ "UPDATE settings SET value='done',updated_at=CURRENT_TIMESTAMP WHERE key='email_schedule_v1_migration' AND value='pending'",
  'CREATE TABLE IF NOT EXISTS reading_state (user_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0 CONSTRAINT reading_revision_nonnegative CHECK(revision>=0))',
  "CREATE TABLE IF NOT EXISTS reading_feedback (user_id TEXT NOT NULL,item_id TEXT NOT NULL,action TEXT NOT NULL CHECK(action IN ('interested','not_interested')),updated_at TEXT NOT NULL,version TEXT NOT NULL,PRIMARY KEY(user_id,item_id))",
  'CREATE TABLE IF NOT EXISTS reading_undo (token TEXT PRIMARY KEY,user_id TEXT NOT NULL,item_id TEXT NOT NULL,before_payload TEXT,after_version TEXT NOT NULL,auto_favorite_version TEXT,created_at TEXT NOT NULL)',
@@ -57,7 +62,9 @@ export class RadarDatabase {
     mkdirSync(dirname(this.localPath), { recursive: true });
     this.local = new DatabaseSync(this.localPath);
     this.local.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
-    for (const query of schema) this.local.exec(query);
+    this.local.exec('BEGIN IMMEDIATE');
+    try { for (const query of schema) this.local.exec(query); this.local.exec('COMMIT'); }
+    catch (error) { this.local.exec('ROLLBACK'); throw error; }
    }
   })().catch(error => { this.ready = undefined; throw error; });
   return this.ready;

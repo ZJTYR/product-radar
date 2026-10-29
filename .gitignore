@@ -48,6 +48,9 @@ yarn-error.log*
 # Vercel, local data, and credential-bearing runtime files
 .vercel/
 .local/
+/.workflow-data/
+/app/.well-known/workflow/
+/public/.well-known/workflow/
 *.sqlite*
 !/.env.example
 
@@ -57,3 +60,4 @@ yarn-error.log*
 **/.wrangler/
 **/dist/
 **/.next/
+/.swc

@@ -10,7 +10,7 @@ import { LibraryToolbar } from "./library-toolbar";
 import { filterLibrary } from "@/lib/library-search";
 import type { RadarLocation, RadarView as View } from "@/lib/radar-navigation";
 import type { ReadingAnnotation } from "@/lib/annotations";
-import type { EmailDeliveryView } from "@/lib/email-types";
+import type { EmailDeliveryView, EmailScheduleView } from "@/lib/email-types";
 import { briefCheckMessage, editionAvailability, githubCheckMessage, latestEdition, readBriefUpdates, resolveHomeFeatured, shanghaiDay } from "@/lib/home-feed";
 import { DismissedItemsDialog, RecommendationsPanel, useInterestFeed } from "./interest";
 import { DiscoveryGrid } from "./discovery-grid";
@@ -75,12 +75,14 @@ function RadarWorkspace() {
   const selectedSourceDate = historyDate || undefined;
   const [settings, setSettings] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
-  const [prefs, setPrefs] = useState<Preferences>({ email: "", deliveryTime: "08:30", emailEnabled: false });
+  const [prefs, setPrefs] = useState<Preferences>({ email: "", deliveryTime: "20:00", emailEnabled: false });
   const [emailConfigured, setEmailConfigured] = useState(false);
   const [deliveryReady, setDeliveryReady] = useState(false);
   const [deliveryReason, setDeliveryReason] = useState("正在核对发信配置");
   const [emailDelivery, setEmailDelivery] = useState<EmailDeliveryView | null>(null);
   const [savedEmail, setSavedEmail] = useState("");
+  const [savedPreferences, setSavedPreferences] = useState<Preferences | null>(null);
+  const [emailSchedule, setEmailSchedule] = useState<EmailScheduleView | null>(null);
   const [emailBusy, setEmailBusy] = useState<"test" | "daily" | "retry" | null>(null);
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailError, setEmailError] = useState("");
@@ -156,7 +158,7 @@ function RadarWorkspace() {
     const historySequence = historySequenceRef.current;
     void Promise.resolve().then(() => loadFeed()).finally(() => setCatalogReady(true));
     void Promise.resolve().then(reloadReading);
-    void request<{ preferences: Preferences; emailConfigured: boolean; deliveryReady: boolean; deliveryReason: string }>("/api/preferences").then(data => { setPrefs(data.preferences); setSavedEmail(data.preferences.email); setEmailConfigured(data.emailConfigured); setDeliveryReady(data.deliveryReady); setDeliveryReason(data.deliveryReason); }).catch(() => notify("偏好设置暂时无法读取"));
+    void request<{ preferences: Preferences; emailConfigured: boolean; deliveryReady: boolean; deliveryReason: string; schedule?:EmailScheduleView }>("/api/preferences").then(data => { setPrefs(data.preferences); setSavedPreferences(data.preferences); setSavedEmail(data.preferences.email); setEmailConfigured(data.emailConfigured); setDeliveryReady(data.deliveryReady); setDeliveryReason(data.deliveryReason); setEmailSchedule(data.schedule || null); }).catch(() => notify("偏好设置暂时无法读取"));
     void request<{ days: HistoryDay[] }>("/api/history").then(data => { if (historySequence === historySequenceRef.current) setHistory(data.days); }).catch(() => notify("简报阅读状态暂时无法读取，请刷新重试"));
     return () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
   }, [loadFeed, notify, reloadReading]);
@@ -164,8 +166,8 @@ function RadarWorkspace() {
   const loadEmailStatus = useCallback(async () => {
     setEmailLoading(true); setEmailError("");
     try {
-      const result = await request<{deliveryReady:boolean;deliveryReason:string;latest:EmailDeliveryView|null}>("/api/email");
-      setDeliveryReady(result.deliveryReady); setDeliveryReason(result.deliveryReason); setEmailDelivery(result.latest);
+      const result = await request<{deliveryReady:boolean;deliveryReason:string;latest:EmailDeliveryView|null;schedule?:EmailScheduleView}>("/api/email");
+      setDeliveryReady(result.deliveryReady); setDeliveryReason(result.deliveryReason); setEmailDelivery(result.latest); setEmailSchedule(result.schedule || null);
     } catch (failure) { setEmailError(failure instanceof Error ? failure.message : "投递状态暂时无法读取"); }
     finally { setEmailLoading(false); }
   }, []);
@@ -334,7 +336,7 @@ function RadarWorkspace() {
   }
   async function savePreferences(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPrefsSaving(true);
-    try { const result = await request<{ preferences: Preferences }>("/api/preferences", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...prefs, deliveryTime: "08:30" }) }); setPrefs(result.preferences); setSavedEmail(result.preferences.email); notify(deliveryReady ? "邮件偏好已保存" : "收件偏好已保存，发信服务就绪后可启用"); await loadEmailStatus(); }
+    try { const result = await request<{ preferences: Preferences; schedule?:EmailScheduleView }>("/api/preferences", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(prefs) }); setPrefs(result.preferences); setSavedPreferences(result.preferences); setSavedEmail(result.preferences.email); setEmailSchedule(result.schedule || null); notify(!result.preferences.emailEnabled ? "定时发送已关闭" : result.schedule?.status === "scheduled" ? `已设为每天 ${result.preferences.deliveryTime} 发送热点海报` : "偏好已保存，请核对下方定时任务状态"); await loadEmailStatus(); }
     catch (err) { notify(err instanceof Error ? err.message : "保存失败"); }
     finally { setPrefsSaving(false); }
   }
@@ -355,9 +357,10 @@ function RadarWorkspace() {
     finally { emailLockRef.current = false; setEmailBusy(null); }
   }
   const emailRecipientChanged = prefs.email.trim() !== savedEmail.trim();
+  const emailPreferencesChanged = Boolean(savedPreferences) && (emailRecipientChanged || prefs.deliveryTime !== savedPreferences?.deliveryTime || prefs.emailEnabled !== savedPreferences?.emailEnabled);
   const emailUnresolvedToday = emailDelivery?.editionDate === today && ["pending", "sending", "unknown"].includes(emailDelivery.status);
   const emailTestBlocked = emailUnresolvedToday && emailDelivery?.kind === "test";
-  const emailDailyBlocked = emailUnresolvedToday && emailDelivery?.kind === "daily";
+  const emailDailyBlocked = emailDelivery?.editionDate === today && emailDelivery.kind === "daily" && ["sending", "unknown"].includes(emailDelivery.status);
   const emailStatusLabels: Record<EmailDeliveryView["status"],string> = {pending:"等待发送",sending:"正在提交发信服务",accepted:"发信服务已接收",failed:"发送失败",unknown:"发送结果待核对"};
   function exportFavorites() { const content = favorites.map(({ itemId, collection, createdAt, updatedAt }) => ({ itemId, collection, createdAt, updatedAt, notes: readingNotes.notes.filter(note => note.itemId === itemId), product: libraryItems.find(item => item.id === itemId) || null })); const url = URL.createObjectURL(new Blob([JSON.stringify(content, null, 2)], { type: "application/json" })); const a = document.createElement("a"); a.href = url; a.download = "拾光-我的收藏.json"; a.click(); URL.revokeObjectURL(url); notify("收藏文件已导出"); }
   const collectionButton = (item: IntelItem) => {
@@ -375,7 +378,7 @@ function RadarWorkspace() {
     <div className="workspace"><header className="topbar"><div className="topbar-location"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21} /></button><span>我的工作台</span><ChevronRight size={13} /><strong>{viewNames[view]}</strong></div><div className="topbar-actions">{view !== "recommendations" && <div className="search"><Search size={16} /><input aria-label="搜索产品、行业、场景或风格" placeholder="搜索产品、行业、场景或风格…" value={query} onChange={event => setQuery(event.target.value)} /><span>⌕</span></div>}<button className="icon-button settings-top" aria-label="偏好设置" onClick={() => setSettings(true)}><Settings2 size={18} /></button><button className="top-avatar" onClick={() => setSettings(true)} aria-label="个人偏好">P</button></div></header>
     <main className="main-content"><div className="page-intro"><div><div className="eyebrow"><span />PRODUCT INTELLIGENCE, DAILY</div><h1>{view === "today" ? <>每一天，都有好发现<span>✦</span></> : viewNames[view]}</h1><p>{view === "today" ? "从软件到实体产品，发现各行各业值得借鉴的好产品。" : view === "recommendations" ? "感兴趣就留下，不感兴趣就划走；根据你的选择推荐下一条灵感。" : view === "products" ? "跨行业拆解产品，看懂需求与商业价值。" : view === "frontier" ? "按主题、日期和阅读状态，回看 AI、科技与产品的变化。" : view === "design" ? "从界面、交互到产品形态，积累可借鉴的设计灵感。" : view === "saved" ? "把值得再看的产品与灵感，收进自己的知识地图。" : "每一份发现，都值得在未来被重新遇见。"}</p></div><div className="intro-actions"><div className="feed-date-summary" aria-label="简报日期与更新状态"><span className="date-label"><CalendarDays size={15} />今天 {today ? day(today) : "正在核对"}</span><span>最新简报 {latest.date ? day(latest.date) : "暂无"}</span><span className={`feed-freshness ${availability === "current" ? "is-current" : "is-pending"}`} role="status">{!feed ? "正在读取简报" : availability === "current" ? feed.meta.freshness?.latestEditionStatus === "partial" ? "今日简报部分来源更新" : "今日简报已更新" : availability === "pending" ? "今日简报尚未产出" : availability === "future" ? "简报日期待核对" : "暂无简报"}</span>{view === "history" && historyDate && <span className="viewing-edition">当前查看 {day(historyDate)}</span>}</div><div className="feed-refresh-actions"><button className="button secondary refresh-button" disabled={mutationBusy || loading} onClick={() => void refreshBrief()}><RefreshCw size={14} className={refreshing === "brief" ? "spin" : ""} />{refreshing === "brief" ? "正在检查" : "检查新简报"}</button><details className="update-more"><summary className="button secondary">更多 <ChevronRight size={14} /></summary><div className="update-more-menu"><button className="button secondary refresh-button github-refresh" disabled={mutationBusy || loading} title={feed?.meta.freshness?.lastStarsCheckedAt ? `上次核对：${day(feed.meta.freshness.lastStarsCheckedAt)} ${time(feed.meta.freshness.lastStarsCheckedAt)}；只核对仓库 Star` : "只核对仓库 Star，新简报由每日采集任务产出"} onClick={() => void refreshGithub()}><Github size={14} className={refreshing === "github" ? "spin" : ""} />{refreshing === "github" ? "正在核对" : "核对 GitHub 数据"}</button><button onClick={() => setSettings(true)}><Settings2 size={14} />偏好设置</button></div></details></div></div></div>
     {view !== "recommendations" && <div className="mobile-search search"><Search size={16} /><input aria-label="手机搜索" placeholder="搜索产品、行业、场景或风格…" value={query} onChange={event => setQuery(event.target.value)} />{query && <button onClick={() => setQuery("")} aria-label="清空搜索"><X size={15} /></button>}</div>}
-    {view !== "recommendations" && <div className="brief-strip"><div className="brief-strip-left"><span className="live-dot" /><strong>{historyDate ? `${day(historyDate)}简报` : "本期简报"}</strong><span className="strip-separator" /><span>{feed ? `${historyDate ? feed.items.length : (feed.meta.editionItemIds?.length ?? feed.meta.total)} 条精选` : "正在读取"}</span><span className="desktop-only">·</span><span className="desktop-only">{feed?.meta.sourceCount || 0} 个信息来源</span></div><button onClick={() => setSettings(true)}><Mail size={14} /><span>{deliveryReady && prefs.emailEnabled ? "简报更新后邮件推送" : emailConfigured ? "邮件简报" : "偏好设置"}</span><ArrowUpRight size={13} /></button></div>}
+    {view !== "recommendations" && <div className="brief-strip"><div className="brief-strip-left"><span className="live-dot" /><strong>{historyDate ? `${day(historyDate)}简报` : "本期简报"}</strong><span className="strip-separator" /><span>{feed ? `${historyDate ? feed.items.length : (feed.meta.editionItemIds?.length ?? feed.meta.total)} 条精选` : "正在读取"}</span><span className="desktop-only">·</span><span className="desktop-only">{feed?.meta.sourceCount || 0} 个信息来源</span></div><button onClick={() => setSettings(true)}><Mail size={14} /><span>{emailSchedule?.status === "scheduled" ? `每天 ${emailSchedule.deliveryTime} 热点海报` : emailConfigured ? "邮件简报" : "偏好设置"}</span><ArrowUpRight size={13} /></button></div>}
     {refreshError && <div className="inline-warning preference-warning" role="alert"><span>{refreshError}</span><button disabled={mutationBusy || loading} onClick={() => void (refreshErrorSource === "github" ? refreshGithub() : refreshBrief())}>{refreshErrorSource === "github" ? "重新核对 GitHub" : "重新检查简报"}</button></div>}
     {readingError && <div className="inline-warning preference-warning" role="alert"><span>阅读记录尚未同步：{readingError}</span><button onClick={() => void reloadReading()}>重试保存与读取</button></div>}
     {interest.feedbackError && <div className="inline-warning preference-warning" role="alert"><span>阅读状态暂时无法核对：{interest.feedbackError}</span><button onClick={() => void interest.reconcile()} disabled={mutationBusy}>重试</button></div>}
@@ -424,9 +427,41 @@ function RadarWorkspace() {
       </ReadingAnnotations></div></div>}</dialog>
     {collectionTarget && <CollectionEditor key={collectionTarget.itemId} target={collectionTarget} names={collectionNames} disabled={mutationBusy} onSave={saveCollection} onClose={() => setCollectionTarget(null)} />}
     <DismissedItemsDialog open={dismissedOpen} feedback={interest.feedback} items={libraryItems} disabled={mutationBusy} onClose={() => setDismissedOpen(false)} onRestore={interest.restore} onOpen={openLibraryItem} />
-    <dialog className="settings-dialog" ref={settingsRef} aria-labelledby="settings-heading" onCancel={() => setSettings(false)} onClick={event => { if (event.target === event.currentTarget) setSettings(false); }}><div className="dialog-inner"><div className="dialog-top"><span><Settings2 size={17} />偏好设置</span><button className="icon-button" aria-label="关闭设置" onClick={() => setSettings(false)}><X size={21} /></button></div><form className="settings-form" onSubmit={event => void savePreferences(event)}><div className="settings-icon"><Mail size={26} /></div><h2 id="settings-heading">邮件简报</h2><p>当天简报更新完成后投递，每天一次。邮件提供精选摘要和工作台链接。</p><label>接收邮箱<input type="email" value={prefs.email} placeholder="your@email.com" disabled={emailBusy !== null || prefsSaving} onChange={event => setPrefs({ ...prefs, email: event.target.value })} required /></label><div className="email-switch"><div><strong>每日邮件简报</strong><p>{deliveryReady ? "当天资料就绪后发送，不会反复发送同一天简报" : deliveryReason || "邮件简报待启用"}</p></div><input type="checkbox" role="switch" aria-label="开启每日邮件简报" disabled={emailBusy !== null || prefsSaving || (!deliveryReady && !prefs.emailEnabled)} checked={prefs.emailEnabled} onChange={event => setPrefs({ ...prefs, emailEnabled: event.target.checked })} /></div><div className="settings-status"><span className={deliveryReady ? "live-dot" : "status-dot"} /><span>{deliveryReady ? "发信配置已就绪，实际发送结果见投递记录。" : deliveryReason || "发信服务尚未就绪，可先保存收件邮箱。"}</span></div><button className="button primary" type="submit" disabled={prefsSaving || emailBusy !== null}>{prefsSaving ? <Loader2 size={16} className="spin" /> : <Check size={16} />}保存偏好</button></form>
-      <section className="email-delivery-panel" aria-label="邮件投递"><div className="email-delivery-actions"><button className="button secondary" disabled={!deliveryReady || !savedEmail || emailRecipientChanged || emailBusy !== null || prefsSaving || Boolean(emailTestBlocked)} onClick={() => void sendEmail("test")}>{emailBusy === "test" ? <Loader2 size={14} className="spin" /> : <Mail size={14} />}发送测试邮件</button><button className="button secondary" disabled={!deliveryReady || !savedEmail || emailRecipientChanged || emailBusy !== null || prefsSaving || Boolean(emailDailyBlocked)} onClick={() => void sendEmail("daily")}>{emailBusy === "daily" ? <Loader2 size={14} className="spin" /> : <Mail size={14} />}发送今天简报</button></div>{emailRecipientChanged && <p className="small muted">请先保存接收邮箱，再发送邮件。</p>}<div className="email-delivery-heading"><strong>最近投递</strong><button className="text-link" disabled={emailLoading || emailBusy !== null} onClick={() => void loadEmailStatus()}>{emailLoading ? "正在读取" : "刷新状态"}</button></div>{emailDelivery ? <div className={`email-delivery-record is-${emailDelivery.status}`} role="status"><strong>{emailStatusLabels[emailDelivery.status]}</strong><p>{emailDelivery.kind === "test" ? "测试邮件" : `${emailDelivery.editionDate} 简报`} · {emailDelivery.recipient}</p><p>{day(emailDelivery.updatedAt)} {time(emailDelivery.updatedAt)}</p>{emailDelivery.errorMessage && <p>{emailDelivery.errorMessage}</p>}{emailDelivery.status === "unknown" && <p>请先查收邮件，当前结果未确认，不自动重发。</p>}{emailDelivery.canRetry && emailDelivery.status === "failed" && <button className="button secondary" disabled={emailBusy !== null || !deliveryReady} onClick={() => void sendEmail("retry")}>重试这封邮件</button>}</div> : !emailLoading && <p className="small muted">还没有投递记录。</p>}{emailError && <p className="inline-warning" role="alert">{emailError}</p>}</section>
-    </div></dialog>
+    <dialog className="settings-dialog" ref={settingsRef} aria-labelledby="settings-heading" onCancel={() => setSettings(false)} onClick={event => { if (event.target === event.currentTarget) setSettings(false); }}>
+      <div className="dialog-inner">
+        <div className="dialog-top"><span><Settings2 size={17} />偏好设置</span><button className="icon-button" aria-label="关闭设置" onClick={() => setSettings(false)}><X size={21} /></button></div>
+        <form className="settings-form" onSubmit={event => void savePreferences(event)}>
+          <div className="settings-title-row"><div className="settings-icon"><Mail size={24} /></div><div><h2 id="settings-heading">热点海报邮件</h2><p>一封邮件，一张海报，手机直接查看。</p></div></div>
+          <label>接收邮箱<input type="email" value={prefs.email} placeholder="your@email.com" disabled={emailBusy !== null || prefsSaving} onChange={event => setPrefs({ ...prefs, email: event.target.value })} required /></label>
+          <div className="email-switch">
+            <div><label htmlFor="email-auto-switch">定时发送</label><p>{prefs.emailEnabled ? "每天一封；关闭后停止自动发送" : "已选择关闭，不再自动发送"}</p></div>
+            <input id="email-auto-switch" className="email-toggle" type="checkbox" role="switch" aria-label="定时发送" disabled={!savedPreferences || emailBusy !== null || prefsSaving || (!deliveryReady && !prefs.emailEnabled)} checked={prefs.emailEnabled} onChange={event => setPrefs({ ...prefs, emailEnabled: event.target.checked })} />
+          </div>
+          <div className="email-time-row"><div><strong>每天发送时间</strong><span>北京时间 · UTC+8</span></div><label className="email-time-input"><span className="sr-only">每天发送时间（北京时间）</span><input type="time" step="60" value={prefs.deliveryTime} disabled={!savedPreferences || emailBusy !== null || prefsSaving} onChange={event => setPrefs({ ...prefs, deliveryTime: event.target.value })} required /></label></div>
+          <p className="email-schedule-help">到点后发送当天完整简报；内容晚到时当日补发，同一天不重复。</p>
+          <div className={`email-schedule-state is-${emailSchedule?.status || "loading"}`} role="status">
+            <Clock3 size={15} /><div><strong>{emailLoading ? "正在核对定时任务" : emailSchedule?.status === "paused" ? "自动发送已关闭" : emailSchedule?.status === "scheduled" ? "定时任务已开启" : emailSchedule?.status === "starting" ? "正在安排定时任务" : emailSchedule?.status === "waiting" ? "等待当天完整简报" : emailSchedule?.status === "error" ? "定时任务需要重试" : "定时任务尚未确认"}</strong>
+            {emailSchedule?.nextRunAt && <p>下次：{day(emailSchedule.nextRunAt)} {time(emailSchedule.nextRunAt)}（北京时间）</p>}
+            {emailSchedule?.errorMessage && <p>{emailSchedule.errorMessage}</p>}
+            {emailSchedule?.status === "paused" && <p>可随时开启；手动发送仍由你决定。</p>}
+            {!deliveryReady && <p>{deliveryReason}</p>}
+          </div></div>
+          <button className="button primary" type="submit" disabled={!savedPreferences || prefsSaving || emailBusy !== null}>{prefsSaving ? <Loader2 size={16} className="spin" /> : <Check size={16} />}{emailSchedule?.status === "error" && !emailPreferencesChanged ? "重试定时任务" : "保存设置"}</button>
+          {emailPreferencesChanged && <p className="email-unsaved" role="status">有未保存的修改，点击保存后生效。</p>}
+        </form>
+        <section className="email-delivery-panel" aria-label="邮件投递">
+          <div className="email-preview-row"><span>邮件只含内嵌海报，无需加载外部图片</span><a className="text-link" href="/api/email/poster" target="_blank" rel="noopener noreferrer">预览今日海报<ArrowUpRight size={13} /></a></div>
+          <div className="email-delivery-actions">
+            <button className="button secondary" disabled={!deliveryReady || !savedEmail || emailRecipientChanged || emailBusy !== null || prefsSaving || Boolean(emailTestBlocked)} onClick={() => void sendEmail("test")}>{emailBusy === "test" ? <Loader2 size={14} className="spin" /> : <Mail size={14} />}发送测试海报</button>
+            <button className="button secondary" disabled={!deliveryReady || !savedEmail || emailRecipientChanged || emailBusy !== null || prefsSaving || Boolean(emailDailyBlocked)} onClick={() => void sendEmail("daily")}>{emailBusy === "daily" ? <Loader2 size={14} className="spin" /> : <Mail size={14} />}立即发送今日海报</button>
+          </div>
+          {emailRecipientChanged && <p className="small muted">请先保存接收邮箱，再发送邮件。</p>}
+          <div className="email-delivery-heading"><strong>最近投递</strong><button className="text-link" disabled={emailLoading || emailBusy !== null} onClick={() => void loadEmailStatus()}>{emailLoading ? "正在读取" : "刷新状态"}</button></div>
+          {emailDelivery ? <div className={`email-delivery-record is-${emailDelivery.status}`} role="status"><strong>{emailStatusLabels[emailDelivery.status]}</strong><p>{emailDelivery.kind === "test" ? "测试邮件" : `${emailDelivery.editionDate} 简报`} · {emailDelivery.recipient}</p><p>{day(emailDelivery.updatedAt)} {time(emailDelivery.updatedAt)}</p>{emailDelivery.errorMessage && <p>{emailDelivery.errorMessage}</p>}{emailDelivery.status === "unknown" && <p>请先查收邮件，当前结果未确认，不自动重发。</p>}{emailDelivery.canRetry && emailDelivery.status === "failed" && <button className="button secondary" disabled={emailBusy !== null || !deliveryReady} onClick={() => void sendEmail("retry")}>重试这封邮件</button>}</div> : !emailLoading && <p className="small muted">还没有投递记录。</p>}
+          {emailError && <p className="inline-warning" role="alert">{emailError}</p>}
+        </section>
+      </div>
+    </dialog>
     {toast && <div className="toast" popover="manual" ref={toastRef} role="status"><Check size={17} />{toast}<button onClick={() => setToast("")} aria-label="关闭提示"><X size={15} /></button></div>}
   </div>;
 }

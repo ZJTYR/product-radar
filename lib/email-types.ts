@@ -15,10 +15,18 @@ export interface EmailDeliveryView {
 }
 export interface EmailReadiness {
   deliveryReady: boolean;
-  deliveryMode: 'after_update';
+  deliveryMode: 'scheduled';
   deliveryReason: string;
 }
+export interface EmailScheduleView {
+  status: 'scheduled' | 'starting' | 'paused' | 'waiting' | 'error';
+  nextRunAt: string | null;
+  deliveryTime: string;
+  timeZone: 'Asia/Shanghai';
+  errorMessage?: string;
+}
 export interface EmailStatusResponse extends EmailReadiness {
+  schedule?: EmailScheduleView;
   enabled: boolean;
   recipient: string;
   latest: EmailDeliveryView | null;
