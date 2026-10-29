@@ -8,9 +8,9 @@ import type { InterestAction, RecommendationResult } from "./interest";
 
 const dateLabel = (item: IntelItem) => `${item.publishedAt ? "发布于" : "收录于"} ${new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric" }).format(new Date(item.publishedAt || item.discoveredAt))}`;
 
-export function FrontierNews({ libraryItems, readIds, savedIds, dismissedIds, disabled, refreshKey, onOpen, onReadSource, onFeedback }: {
+export function FrontierNews({ libraryItems, readIds, savedIds, dismissedIds, disabled, refreshKey, onAll, onOpen, onReadSource, onFeedback }: {
   libraryItems: IntelItem[]; readIds: Set<string>; savedIds: Set<string>; dismissedIds: Set<string>; disabled: boolean; refreshKey: string;
-  onOpen: (item: IntelItem) => void; onReadSource: (item: IntelItem) => void; onFeedback: (item: IntelItem, action: InterestAction) => Promise<boolean>;
+  onAll: () => void; onOpen: (item: IntelItem) => void; onReadSource: (item: IntelItem) => void; onFeedback: (item: IntelItem, action: InterestAction) => Promise<boolean>;
 }) {
   const [items, setItems] = useState<IntelItem[]>([]);
   const [showRead, setShowRead] = useState(false);
@@ -53,7 +53,7 @@ export function FrontierNews({ libraryItems, readIds, savedIds, dismissedIds, di
     finally { setChanging(null); }
   }
   return <section className="content-section ai-frontier-section" aria-label="前沿动态">
-    <div className="section-heading"><div><span className="section-mark purple"><Sparkles size={16} /></span><h2>前沿动态</h2><span className="section-description">AI · 科技 · 产品 · 最近 7 天{!loading && visible.length > 0 ? ` · ${visible.length} 条` : ""}</span></div><button className="text-link" aria-pressed={showRead} onClick={() => setShowRead(value => !value)}>{showRead ? "返回精选动态" : "查看已读"}<ArrowUpRight size={14} /></button></div>
+    <div className="section-heading"><div><span className="section-mark purple"><Sparkles size={16} /></span><h2>前沿动态</h2><span className="section-description">AI · 科技 · 产品 · 最近 7 天{!loading && visible.length > 0 ? ` · ${visible.length} 条` : ""}</span></div><div className="frontier-heading-actions"><button className="text-link" aria-pressed={showRead} onClick={() => setShowRead(value => !value)}>{showRead ? "返回精选动态" : "查看已读"}<ArrowUpRight size={14} /></button><button className="text-link" onClick={onAll}>查看全部 <ArrowUpRight size={14} /></button></div></div>
     {error && <div className="inline-warning discovery-grid-warning" role="alert"><span>{error}</span><button disabled={loading} onClick={() => void load()}>重试</button></div>}
     {loading && !visible.length ? <div className="frontier-empty" role="status"><Loader2 className="spin" size={20} />正在读取前沿资讯</div> : visible.length ? <div className="frontier-list">{visible.map(item => <article className="frontier-card" key={item.id} data-item-id={item.id}>
       <div className="frontier-meta"><span className="frontier-topic">{frontierLabel(item)}</span><span>{dateLabel(item)}</span><span className={`reading-badge ${readIds.has(item.id) ? "is-read" : "is-unread"}`}>{readIds.has(item.id) ? <Check size={12} /> : <i />}{readIds.has(item.id) ? "已读" : "未读"}</span></div>

@@ -5,12 +5,13 @@ import type { IntelItem } from './types';
 import { isSameOriginMutation } from './validation';
 import { ZodError } from 'zod';
 import { persistEdition } from './editions';
+import { emailReadiness } from './email-smtp';
 
 export class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
 export function database() { return getDatabase(); }
 export const now = () => new Date().toISOString();
 export function shanghaiDate() { return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' }); }
-export function emailConfigured() { return Boolean(process.env.RESEND_API_KEY && process.env.MAIL_FROM); }
+export function emailConfigured() { return emailReadiness().deliveryReady; }
 export async function currentUser() { const user = await getChatGPTUser(); if (!user) throw new HttpError(401, '请先登录以保存个人收藏与偏好'); return user; }
 export function checkMutation(request: Request) { if (!isSameOriginMutation(request)) throw new HttpError(403, '请从工作台内提交此操作'); }
 export async function body(request: Request) { const value = await request.text(); if (value.length > 500_000) throw new HttpError(413, '内容过大'); try { return JSON.parse(value); } catch { throw new HttpError(400, '请求 JSON 格式无效'); } }

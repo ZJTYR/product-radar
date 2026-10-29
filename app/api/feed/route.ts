@@ -21,7 +21,7 @@ export function GET(request: Request) { return route(async () => {
   return json({ items, meta: {
     updatedAt: edition?.updated_at || '', date: edition?.date || '', total: editionItems.length,
     editionItemIds: editionItems.map(item => item.id), scheduleStatus: schedule || '每日更新待启用',
-    emailStatus: emailConfigured() ? '发信配置已就绪，投递任务待接通' : '发信服务未配置', emailConfigured: emailConfigured(),
+    emailStatus: emailConfigured() ? '邮件发信已配置，可在偏好中开启简报完成后投递' : 'SMTP 发信配置待完成', emailConfigured: emailConfigured(),
     sourceCount: new Set(editionItems.flatMap(item => item.sources.map(source => new URL(source.url).hostname))).size,
     lastRunStatus, freshness,
   }, user: { name: user?.displayName || '产品探索者', signedIn: Boolean(user) } });
