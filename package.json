@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint app components/radar lib scripts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-transform-types --test tests/*.test.mjs",
+    "test": "node --experimental-transform-types --test tests/*.test.mjs collector-site/tests/*.test.mjs",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
