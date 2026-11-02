@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownToLine, ArrowRight, ArrowUpRight, Bell, Bookmark, CalendarDays, Check, ChevronRight, CircleHelp, Clock3, Compass, ExternalLink, FileText, GitFork as Github, LayoutGrid, Lightbulb, Loader2, Mail, Menu, Radio, RefreshCw, Search, Settings2, Sparkles, Star, X } from "lucide-react";
 import type { FeedResponse, IntelItem, Preferences, SavedItem } from "@/lib/types";
+import { briefCheckMessage, editionAvailability, feedScopeMatches, githubCheckMessage, latestEdition, shanghaiDay } from "@/lib/feed-freshness";
 
 type View = "today" | "products" | "design" | "saved" | "history";
 type HistoryDay = { date: string; count: number; updatedAt: string; status: string };
@@ -36,13 +37,15 @@ function ProductVisual({ item, large }: { item: IntelItem; large: boolean }) {
 
 export default function Radar() {
   const [feed, setFeed] = useState<FeedResponse | null>(null);
+  const [feedScope, setFeedScope] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<SavedItem[]>([]);
   const [view, setView] = useState<View>("today");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
+  const [refreshing, setRefreshing] = useState<"brief" | "github" | null>(null);
+  const [clockToday, setClockToday] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [selected, setSelected] = useState<IntelItem | null>(null);
   const [settings, setSettings] = useState(false);
@@ -60,20 +63,32 @@ export default function Radar() {
   const settingsRef = useRef<HTMLDialogElement>(null);
   const toastRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const feedSequenceRef = useRef(0);
+  const refreshLockRef = useRef(false);
   const notify = useCallback((message: string) => { setToast(message); if (toastTimer.current) clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 4800); }, []);
   const loadFeed = useCallback(async (date = "") => {
+    const sequence = ++feedSequenceRef.current;
     setLoading(true); setError("");
-    try { setFeed(await request<FeedResponse>(`/api/feed${date ? `?date=${date}` : ""}`)); }
-    catch (err) { setError(err instanceof Error ? err.message : "加载失败"); }
-    finally { setLoading(false); }
+    try {
+      const data = await request<FeedResponse>(`/api/feed${date ? `?date=${date}` : ""}`);
+      if (sequence !== feedSequenceRef.current) return null;
+      setFeed(data); setFeedScope(date); return data;
+    }
+    catch (err) { if (sequence === feedSequenceRef.current) setError(err instanceof Error ? err.message : "加载失败"); return null; }
+    finally { if (sequence === feedSequenceRef.current) setLoading(false); }
   }, []);
   useEffect(() => {
-    void request<FeedResponse>("/api/feed").then(setFeed).catch(err => setError(err instanceof Error ? err.message : "加载失败")).finally(() => setLoading(false));
+    void Promise.resolve().then(() => loadFeed());
     void request<{ favorites: SavedItem[] }>("/api/favorites").then(data => setFavorites(data.favorites)).catch(() => setFavError("收藏暂时无法读取，请刷新重试"));
     void request<{ preferences: Preferences; emailConfigured: boolean }>("/api/preferences").then(data => { setPrefs(data.preferences); setEmailConfigured(data.emailConfigured); }).catch(() => notify("推送设置暂时无法读取"));
     void request<{ days: HistoryDay[] }>("/api/history").then(data => setHistory(data.days)).catch(() => {});
     return () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
   }, [loadFeed, notify]);
+  useEffect(() => {
+    const tick = () => setClockToday(shanghaiDay());
+    tick(); const timer = setInterval(tick, 30_000);
+    return () => clearInterval(timer);
+  }, []);
   useEffect(() => { const dialog = detailRef.current; if (selected && dialog && !dialog.open) dialog.showModal(); if (!selected && dialog?.open) dialog.close(); }, [selected]);
   useEffect(() => { const dialog = settingsRef.current; if (settings && dialog && !dialog.open) dialog.showModal(); if (!settings && dialog?.open) dialog.close(); }, [settings]);
   useEffect(() => {
@@ -127,11 +142,35 @@ export default function Radar() {
     catch (err) { notify(err instanceof Error ? err.message : "保存失败，请重试"); }
     finally { setSaving(null); }
   }
-  async function refresh() {
-    setRefreshing(true);
-    try { const result = await request<{ ok: boolean; count: number; partial: boolean; errors?: string[] }>("/api/refresh", { method: "POST" }); setHistoryDate(""); await loadFeed(); const data = await request<{ days: HistoryDay[] }>("/api/history"); setHistory(data.days); notify(result.partial ? `部分 GitHub 数据核对完成；部分来源暂不可用` : `GitHub 数据核对完成，共 ${result.count} 条资料`); }
-    catch (err) { notify(err instanceof Error ? err.message : "更新失败，请稍后重试"); }
-    finally { setRefreshing(false); }
+  async function refreshBrief() {
+    if (refreshLockRef.current) return;
+    refreshLockRef.current = true; setRefreshing("brief");
+    const sequence = feedSequenceRef.current + 1;
+    try {
+      const [result, archive] = await Promise.allSettled([loadFeed(historyDate), request<{ days: HistoryDay[] }>("/api/history")]);
+      if (sequence !== feedSequenceRef.current) return;
+      if (archive.status === "fulfilled") setHistory(archive.value.days);
+      if (result.status === "rejected" || !result.value) notify(feedScopeMatches(feedScope, historyDate) ? "简报检查未完成，请重试；已保留原有内容。" : "简报检查未完成，请重试。");
+      else if (archive.status === "rejected") notify("简报已读取，历史档案暂时无法核对，请重试。");
+      else notify(briefCheckMessage(feed, result.value, shanghaiDay(), historyDate ? result.value.meta.date : ""));
+    }
+    catch (err) { notify(err instanceof Error ? err.message : "简报检查失败，请重试"); }
+    finally { refreshLockRef.current = false; setRefreshing(null); }
+  }
+  async function refreshGithub() {
+    if (refreshLockRef.current) return;
+    refreshLockRef.current = true; setRefreshing("github");
+    const sequence = feedSequenceRef.current;
+    try {
+      const result = await request<{ checked: number; partial: boolean }>("/api/refresh", { method: "POST" });
+      if (sequence === feedSequenceRef.current) {
+        const data = await loadFeed(historyDate);
+        if (!data) { notify("GitHub 核对已完成，资料读取失败，请重新检查简报。"); return; }
+      }
+      notify(githubCheckMessage(result));
+    }
+    catch (err) { notify(err instanceof Error ? err.message : "GitHub 数据核对失败，请重试"); }
+    finally { refreshLockRef.current = false; setRefreshing(null); }
   }
   async function savePreferences(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPrefsSaving(true);
@@ -143,18 +182,23 @@ export default function Radar() {
   const bookmark = (item: IntelItem, className = "") => <button className={`bookmark-button ${savedIds.has(item.id) ? "is-saved" : ""} ${className}`} aria-label={savedIds.has(item.id) ? `取消收藏 ${item.name}` : `收藏 ${item.name}`} title={savedIds.has(item.id) ? "取消收藏" : "加入收藏"} disabled={saving === item.id} onClick={(event) => { event.stopPropagation(); void toggleFavorite(item); }}>{saving === item.id ? <Loader2 size={17} className="spin" /> : <Bookmark size={17} fill={savedIds.has(item.id) ? "currentColor" : "none"} />}</button>;
   const productCard = (item: IntelItem) => <article className="product-card" key={item.id}><button className="card-open" onClick={() => openItem(item)}><Visual item={item} /><div className="product-card-body"><div className="card-kicker"><span>{item.category}</span>{item.stars != null && <span className="star-count" title={`截至 ${item.starsCheckedAt || "采集时间"}`}><Star size={12} />{stars(item.stars)}</span>}</div><h3>{item.name}<ArrowUpRight size={16} /></h3><p>{item.title || item.summary}</p><div className="card-tags">{item.tags.slice(0, 2).map(tag => <span key={tag}>{tag}</span>)}<span className="read-time">{item.readMinutes} 分钟</span></div></div></button>{bookmark(item, "card-bookmark")}</article>;
   const designCard = (item: IntelItem) => <article className="design-card" key={item.id}><button className="card-open" onClick={() => openItem(item)}><Visual item={item} /><div className="design-card-body"><div className="card-kicker"><span>{item.category}</span><span>{item.evidence}</span></div><h3>{item.name}<ArrowUpRight size={19} /></h3><p>{item.subtitle}</p><div className="card-tags">{item.tags.slice(0, 3).map(tag => <span key={tag}>{tag}</span>)}</div><ul className="design-highlights">{item.designNotes.slice(0, 3).map((note, index) => <li key={index}><span>0{index + 1}</span>{note}</li>)}</ul></div></button>{bookmark(item, "card-bookmark")}</article>;
+  const today = clockToday || feed?.meta.freshness?.today || "";
+  const latest = feed ? latestEdition(feed.meta) : { date: "", updatedAt: "" };
+  const availability = editionAvailability(today, latest.date);
+  const hasCurrentFeed = Boolean(feed) && feedScopeMatches(feedScope, historyDate);
 
   return <div className="radar-app">
     {mobileNav && <button className="nav-backdrop" onClick={() => setMobileNav(false)} aria-label="关闭导航" />}
     <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`} aria-label="主导航"><Link className="brand" href="/" aria-label="拾光首页"><div className="brand-mark"><Radio size={24} strokeWidth={1.7} /></div><div><strong>拾光<span>SHIGUANG</span></strong><small>好产品，先看见。</small></div></Link><button className="mobile-close icon-button" onClick={() => setMobileNav(false)} aria-label="关闭导航"><X size={20} /></button><div className="nav-label">探索 · DISCOVER</div><nav>{navigation.map(nav => <button key={nav.id} onClick={() => changeView(nav.id)} className={`nav-item ${view === nav.id ? "active" : ""}`}><nav.icon size={18} strokeWidth={1.7} /><span>{nav.label}</span>{nav.id === "saved" && <span className="nav-count">{favorites.length}</span>}{nav.id === "today" && <span className="active-dot" />}</button>)}</nav><div className="sidebar-note"><div className="sidebar-note-icon"><Lightbulb size={18} /></div><strong>把灵感，变成下一步。</strong><p>跨行业发现好产品，<br />从需求、商业与设计中找灵感。</p><button onClick={() => changeView("saved")}>打开我的收藏 <ArrowRight size={14} /></button></div><div className="sidebar-bottom"><button className="nav-item" onClick={() => setSettings(true)}><Settings2 size={18} />推送与偏好</button><div className="profile"><div className="avatar">P</div><div><strong>{feed?.user.name || "产品探索者"}</strong><span>个人情报工作台</span></div><span className="profile-dot" /></div></div></aside>
     <div className="workspace"><header className="topbar"><div className="topbar-location"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21} /></button><span>我的工作台</span><ChevronRight size={13} /><strong>{viewNames[view]}</strong></div><div className="topbar-actions"><div className="search"><Search size={16} /><input aria-label="搜索产品、行业、场景或风格" placeholder="搜索产品、行业、场景或风格…" value={query} onChange={event => setQuery(event.target.value)} /><span>⌕</span></div><button className="icon-button settings-top" aria-label="推送设置" onClick={() => setSettings(true)}><Bell size={18} /><i /></button><button className="top-avatar" onClick={() => setSettings(true)} aria-label="个人偏好">P</button></div></header>
-    <main className="main-content"><div className="page-intro"><div><div className="eyebrow"><span />PRODUCT INTELLIGENCE, DAILY</div><h1>{view === "today" ? <>每一天，都有好发现<span>✦</span></> : viewNames[view]}</h1><p>{view === "today" ? "从软件到实体产品，发现各行各业值得借鉴的好产品。" : view === "products" ? "跨行业拆解高关注与有市场表现依据的产品，看懂需求与商业价值。" : view === "design" ? "从界面、交互到产品形态，积累可借鉴的设计灵感。" : view === "saved" ? "把值得再看的产品与灵感，收进自己的知识地图。" : "每一份发现，都值得在未来被重新遇见。"}</p></div><div className="intro-actions"><span className="date-label"><CalendarDays size={15} />{day(feed?.meta.date)}</span><button className="button secondary refresh-button" disabled={refreshing} onClick={() => void refresh()}><RefreshCw size={14} className={refreshing ? "spin" : ""} />{refreshing ? "正在核对" : "更新数据"}</button></div></div>
+    <main className="main-content"><div className="page-intro"><div><div className="eyebrow"><span />PRODUCT INTELLIGENCE, DAILY</div><h1>{view === "today" ? <>每一天，都有好发现<span>✦</span></> : viewNames[view]}</h1><p>{view === "today" ? "从软件到实体产品，发现各行各业值得借鉴的好产品。" : view === "products" ? "跨行业拆解高关注与有市场表现依据的产品，看懂需求与商业价值。" : view === "design" ? "从界面、交互到产品形态，积累可借鉴的设计灵感。" : view === "saved" ? "把值得再看的产品与灵感，收进自己的知识地图。" : "每一份发现，都值得在未来被重新遇见。"}</p></div><div className="intro-actions"><div className="feed-date-summary" aria-label="简报日期与更新状态"><span className="date-label"><CalendarDays size={15} />今天 {today ? day(today) : "正在核对"}</span><span>最新简报 {latest.date ? day(latest.date) : "暂无"}</span><span className={`feed-freshness ${availability === "current" ? "is-current" : "is-pending"}`} role="status">{!feed ? "正在读取简报" : availability === "current" ? feed.meta.freshness?.latestEditionStatus === "partial" ? "今日简报部分来源更新" : "今日简报已更新" : availability === "pending" ? "今日简报尚未产出" : availability === "future" ? "简报日期待核对" : "暂无简报"}</span>{view === "history" && historyDate && <span className="viewing-edition">当前查看 {day(feed?.meta.date || historyDate)}</span>}</div><div className="feed-refresh-actions"><a className="button secondary" href="https://product-radar-gules.vercel.app/" target="_blank" rel="noopener noreferrer">打开新版工作台 <ArrowUpRight size={14} /></a><button className="button secondary refresh-button" disabled={Boolean(refreshing) || loading} onClick={() => void refreshBrief()}><RefreshCw size={14} className={refreshing === "brief" ? "spin" : ""} />{refreshing === "brief" ? "正在检查" : "检查新简报"}</button><details className="update-more"><summary className="button secondary">更多 <ChevronRight size={14} /></summary><div className="update-more-menu"><button className="button secondary refresh-button" disabled={Boolean(refreshing) || loading} title="只核对 GitHub 仓库 Star；不会启动内容采集" onClick={() => void refreshGithub()}><Github size={14} className={refreshing === "github" ? "spin" : ""} />{refreshing === "github" ? "正在核对" : "核对 GitHub 数据"}</button></div></details></div></div></div>
     <div className="mobile-search search"><Search size={16} /><input aria-label="手机搜索" placeholder="搜索产品、行业、场景或风格…" value={query} onChange={event => setQuery(event.target.value)} />{query && <button onClick={() => setQuery("")} aria-label="清空搜索"><X size={15} /></button>}</div>
-    <div className="brief-strip"><div className="brief-strip-left"><span className="live-dot" /><strong>{historyDate ? `${day(historyDate)}简报` : "本期简报"}</strong><span className="strip-separator" /><span>{feed ? `${historyDate ? feed.items.length : (feed.meta.editionItemIds?.length ?? feed.meta.total)} 条精选` : "正在读取"}</span><span className="desktop-only">·</span><span className="desktop-only">{feed?.meta.sourceCount || 0} 个信息来源</span></div><button onClick={() => setSettings(true)}><Mail size={14} /><span>{emailConfigured && prefs.emailEnabled ? `每日 ${prefs.deliveryTime} 邮件推送` : "设置邮件简报"}</span><ArrowUpRight size={13} /></button></div>
+    <div className="brief-strip"><div className="brief-strip-left"><span className="live-dot" /><strong>{historyDate ? `${day(feed?.meta.date || historyDate)}简报` : "本期简报"}</strong><span className="strip-separator" /><span>{feed ? `${historyDate ? feed.items.length : (feed.meta.editionItemIds?.length ?? feed.meta.total)} 条精选` : "正在读取"}</span><span className="desktop-only">·</span><span className="desktop-only">{feed?.meta.sourceCount || 0} 个信息来源</span></div><button onClick={() => setSettings(true)}><Mail size={14} /><span>{emailConfigured && prefs.emailEnabled ? `每日 ${prefs.deliveryTime} 邮件推送` : "设置邮件简报"}</span><ArrowUpRight size={13} /></button></div>
     {favError && <div className="inline-warning">{favError}</div>}
     {view === "history" && <section className="history-section"><div className="section-heading"><div><span className="section-mark"><CalendarDays size={16} /></span><h2>简报档案</h2></div><span className="muted">按日期查看</span></div><div className="history-days">{history.length ? history.map(record => <button className={`history-day ${historyDate === record.date ? "chosen" : ""}`} key={record.date} onClick={() => { setHistoryDate(record.date); void loadFeed(record.date); }}><CalendarDays size={20} /><strong>{record.date}</strong><span>{record.count} 条内容</span>{historyDate === record.date ? <Check size={16} /> : <ArrowUpRight size={16} />}</button>) : <p className="muted">第一份简报将在本次更新后归档。</p>}</div></section>}
     {view === "saved" && <div className="collection-toolbar"><div className="collection-tabs">{["全部收藏", ...collectionNames].map(name => <button key={name} onClick={() => setCollectionFilter(name)} className={collectionFilter === name ? "selected" : ""}>{name}</button>)}</div><button className="button secondary" onClick={exportFavorites} disabled={!favorites.length}><ArrowDownToLine size={14} />导出收藏</button></div>}
-    {loading ? <div className="loading-grid" aria-label="正在加载简报"><div className="skeleton skeleton-feature" /><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div> : error ? <div className="empty-state"><CircleHelp size={34} /><h2>资讯暂时没有加载出来</h2><p>{error}</p><button className="button primary" onClick={() => void loadFeed(historyDate)}>重新加载</button></div> : !hasVisibleContent ? <div className="empty-state">{view === "saved" ? <Bookmark size={34} /> : <Search size={34} />}<h2>{query ? "还没有找到匹配的内容" : view === "saved" ? "给下一个好想法留个位置" : "这一期还没有内容"}</h2><p>{query ? "试试产品名称、行业、业务场景或设计风格。" : view === "saved" ? "点击卡片上的收藏图标，就能把喜欢的内容保存在这里。" : "点击更新数据，核对公开来源的 GitHub 关注度。"}</p><button className="button primary" onClick={() => query ? setQuery("") : view === "saved" ? changeView("today") : void refresh()}>{query ? "清空搜索" : view === "saved" ? "去发现好产品" : "更新数据"}<ArrowRight size={15} /></button></div> : <>
+    {error && hasCurrentFeed && <div className="inline-warning" role="alert"><span>检查未完成：{error}。已保留上次读取的内容。</span><button className="text-link" disabled={Boolean(refreshing) || loading} onClick={() => void refreshBrief()}>重新检查</button></div>}
+    {loading && !hasCurrentFeed ? <div className="loading-grid" aria-label="正在加载简报"><div className="skeleton skeleton-feature" /><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div> : error && !hasCurrentFeed ? <div className="empty-state"><CircleHelp size={34} /><h2>资讯暂时没有加载出来</h2><p>{error}</p><button className="button primary" onClick={() => void loadFeed(historyDate)}>重新加载</button></div> : !hasVisibleContent ? <div className="empty-state">{view === "saved" ? <Bookmark size={34} /> : <Search size={34} />}<h2>{query ? "还没有找到匹配的内容" : view === "saved" ? "给下一个好想法留个位置" : "这一期还没有内容"}</h2><p>{query ? "试试产品名称、行业、业务场景或设计风格。" : view === "saved" ? "点击卡片上的收藏图标，就能把喜欢的内容保存在这里。" : "点击检查新简报，读取已经采集完成的内容。"}</p><button className="button primary" onClick={() => query ? setQuery("") : view === "saved" ? changeView("today") : void refreshBrief()}>{query ? "清空搜索" : view === "saved" ? "去发现好产品" : "检查新简报"}<ArrowRight size={15} /></button></div> : <>
     {(view === "today" || view === "history") && !query && featured && <section className="featured-section"><div className="section-heading"><div><span className="section-mark"><Compass size={16} /></span><h2>{view === "history" ? "本期产品解读" : "先看懂一个产品"}</h2><span className="section-description">它是什么 · 为什么有人需要 · 有什么价值</span></div><button className="text-link" onClick={() => changeView("products")}>全部拆解 <ArrowRight size={14} /></button></div><article className="featured-card"><button className="featured-image" onClick={() => openItem(featured)}><Visual item={featured} large /></button><div className="featured-body"><div className="featured-top"><span className="pill green"><span />本期重点 · PRODUCT PICK</span>{bookmark(featured)}</div><div className="featured-name">{featured.name}<span>{featured.category}</span></div><button className="featured-title" onClick={() => openItem(featured)}><h2>{featured.title}</h2></button><p>{featured.summary}</p><div className="featured-insight"><Lightbulb size={17} /><span><strong>产品价值</strong>{featured.differentiation}</span></div><div className="featured-footer"><span>{featured.github ? <Github size={15} /> : <Compass size={15} />}{featured.stars != null ? `${stars(featured.stars)} Stars` : featured.evidence}<span className="footer-dot">·</span><Clock3 size={13} />{featured.readMinutes} 分钟</span><button onClick={() => openItem(featured)}>阅读拆解 <ArrowUpRight size={17} /></button></div></div></article></section>}
     {view === "saved" ? <section className="saved-grid">{visible.map(item => <div key={item.id}>{item.kind === "design" ? designCard(item) : productCard(item)}<button className="saved-note" onClick={() => openItem(item)}><FileText size={14} /><span><strong>{favorites.find(f => f.itemId === item.id)?.collection}</strong>{favorites.find(f => f.itemId === item.id)?.note || "添加你的想法与备注…"}</span><ChevronRight size={14} /></button></div>)}</section> : <>
     {view === "today" && githubPicks.length > 0 && <section className="content-section github-section"><div className="section-heading"><div><span className="section-mark"><Github size={16} /></span><h2>GitHub 高关注产品</h2><span className="section-description">近期收录 · 库内精选 · 非今日发布</span></div><span className="section-counter">{githubPicks.length} 个候选</span></div><p className="section-context">从已收录产品中按 Star 数排序，先选感兴趣的，再看需求、使用场景与商业模式。</p><div className="product-grid">{githubPicks.map(productCard)}</div></section>}

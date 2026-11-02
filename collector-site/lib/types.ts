@@ -16,8 +16,12 @@ export interface IntelItem {
 }
 export interface SavedItem { itemId: string; collection: string; note: string; createdAt: string; updatedAt: string }
 export interface Preferences { email: string; deliveryTime: string; emailEnabled: boolean }
+export interface FeedFreshness {
+ today: string; checkedAt: string; latestEditionDate: string; latestEditionUpdatedAt: string; latestEditionStatus: string;
+ lastStarsCheckedAt: string; lastStarsStatus: string;
+}
 export interface FeedResponse {
  items: IntelItem[];
- meta: { updatedAt: string; date: string; total: number; scheduleStatus: string; emailStatus: string; sourceCount: number; lastRunStatus: string; lastError?: string; editionItemIds?: string[]; emailConfigured?: boolean; };
+ meta: { updatedAt: string; date: string; total: number; scheduleStatus: string; emailStatus: string; sourceCount: number; lastRunStatus: string; freshness: FeedFreshness; lastError?: string; editionItemIds?: string[]; emailConfigured?: boolean; };
  user: { name: string; signedIn: boolean };
 }
