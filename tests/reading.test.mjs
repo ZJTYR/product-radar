@@ -86,11 +86,11 @@ test('grid scopes and exclusions reserve unseen candidates without adding negati
  assert.equal(excluded.remaining,0);
 });
 
-test('AI frontier requires an explicit application layer tag and orders actual recent events before discovery fallback',()=>{
+test('AI frontier requires an explicit application layer tag and retains dated historical events after recent ones',()=>{
  const next=recommendItems(items,[],[],5,at,{scope:'ai'});
- assert.deepEqual(next.items.map(item=>item.id),['ai-new','ai-unknown-date','ai-old']);assert.equal(next.remaining,3);
+ assert.deepEqual(next.items.map(item=>item.id),['ai-new','ai-unknown-date','ai-old','ai-stale']);assert.equal(next.remaining,4);
  const filtered=recommendItems(items,[],[{itemId:'ai-new'}],5,at,{scope:'ai',excludeIds:['ai-old'],readItems:[{itemId:'ai-unknown-date',readAt:version}]});
- assert.equal(filtered.remaining,0);
+ assert.deepEqual(filtered.items.map(item=>item.id),['ai-stale']);assert.equal(filtered.remaining,1);
 });
 
 test('reading and candidate input reject forged owners, malformed versions, unknown scopes and excessive exclusions',()=>{

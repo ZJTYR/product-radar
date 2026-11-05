@@ -5,6 +5,8 @@ import { frontierEventTime, recentFrontierItems } from '../lib/frontier.ts';
 import { itemSchema, catalogSchema } from '../lib/validation.ts';
 import { itemSchema as collectorItemSchema } from '../collector-site/lib/validation.ts';
 import { seedItems } from '../lib/seed.ts';
+import { collectionPolicy } from '../lib/collection-policy.ts';
+import { collectionPolicy as collectorPolicy } from '../collector-site/lib/collection-policy.ts';
 
 const at = Date.parse('2026-10-28T11:00:00+08:00');
 const item = (id, overrides = {}) => ({ ...seedItems[0], id, kind: 'news', newsTopic: 'technology', publishedAt: '2026-10-27', discoveredAt: '2026-10-28T02:00:00Z', ...overrides });
@@ -49,6 +51,25 @@ test('frontier deduplicates stable IDs and leaves ordinary product recommendatio
   assert.equal(recommend([ai('same'), ai('same')]).items.length, 1);
   const product = item('product', { kind: 'product', newsTopic: undefined });
   assert.equal(recommendItems([product], [], [], 6, at, { scope: 'products', readItems: [{ itemId: 'product', readAt: '2026-10-28T00:00:00Z' }] }).items.length, 0);
+});
+
+test('frontier retains historical unread candidates and honest dates, with recent priority within each reading group', () => {
+  const historical = ai('historical', { publishedAt: '2025-01-12', discoveredAt: '2026-10-28T02:00:00Z' });
+  const result = recommend([historical, item('recent-tech'), ai('recent-read'), ai('old-read', { publishedAt: '2026-09-01' }), item('future', { publishedAt: '2026-10-29' })], { readItems: [{ itemId: 'recent-read' }, { itemId: 'old-read' }] });
+  assert.deepEqual(result.items.map(item => item.id), ['recent-tech', 'historical', 'recent-read', 'old-read']);
+  assert.equal(result.items[1].publishedAt, '2025-01-12');
+  assert.match(result.reasons.historical, /往期精选/);
+  assert.match(result.reasons['recent-tech'], /近期动态/);
+  assert.equal(result.remaining, 4);
+  assert.deepEqual(recommend([historical]).items.map(item => item.id), ['historical']);
+  assert.deepEqual(recommend([historical], {}, [{ itemId: 'historical', action: 'not_interested' }]).items, []);
+});
+
+test('collector and workbench share an unlimited publication scope while preserving a recent ranking preference', () => {
+  assert.deepEqual(collectionPolicy, collectorPolicy);
+  assert.equal(collectionPolicy.dateScope.publicationDateLimit, null);
+  assert.equal(collectionPolicy.frontierNews.windowDays, null);
+  assert.equal(collectionPolicy.frontierNews.recentPriorityDays, 7);
 });
 
 test('collector and production accept the same dated news contract and reject unclassified or undated news', () => {

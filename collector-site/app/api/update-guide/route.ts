@@ -7,8 +7,8 @@ export function GET() { return route(async()=> { await initialize(); const rows=
  instructions:[
  "先读取 /api/feed 与本指南，按 id、产品官网、GitHub repo、事件日期检查已有内容；同一事件沿用稳定 id，不重复创建。",
  ...collectionRules,
- "持续维护跨行业合格产品候选库，以首页8条展示和至少16条备选为储备目标，不为数量牺牲质量。GitHub高关注只是候选方向之一；先检查已有记录并去重，按实质新变化或新发现的使用价值补充，成熟产品保留真实发现日期。产品库可用 POST /api/catalog 写入 {items:[完整IntelItem]}（1—50条、按id更新），不改变历史简报或用户收藏；当天有新动态的产品仍通过 /api/ingest 纳入本期。",
- "POST /api/ingest 写入 {date,items,status}；items 是当天完整清单而不是增量补丁，最多20条。可对同日重放，库内容按 id 更新，用户收藏和备注独立保存。禁止未来日期。历史已有快照仅允许相同内容重放，不能覆盖；新发现写入当天。",
+ "持续维护跨行业合格产品候选库，以首页8条展示和至少16条备选为储备目标，不为数量牺牲质量。GitHub高关注只是候选方向之一；先检查已有记录并去重，按实质新变化或新发现的使用价值补充，成熟产品保留真实发现日期。产品库可用 POST /api/catalog 写入 {items:[完整IntelItem]}（1—50条、按id更新），不改变历史简报或用户收藏；本次新核验且有价值的内容均可通过 /api/ingest 纳入本期，不要求今天发布。",
+ "POST /api/ingest 写入 {date,items,status}；date是本次研究编辑日期，不是每条内容的发布日期；items 是当天完整清单而不是增量补丁，最多20条。可对同日重放，库内容按 id 更新，用户收藏和备注独立保存。禁止未来日期。历史已有快照仅允许相同内容重放，不能覆盖；新发现写入当天。",
  "写入后 GET /api/feed?date=日期 与 /api/health 核对条数、日期、来源及已入库内容；再 POST /api/sync 重试Vercel同步并 GET /api/sync 确认 pending=0。若仍有待同步项，明确汇报新工作台尚未同步完成，不能报作全部成功。新工作台 https://product-radar-gules.vercel.app；本Sites继续负责采集和推送数据。",
  "服务访问使用 Sites 支持的 owner-private service access。凭证只放请求头，不写入源码、提示词或结果。不得改变站点可见性。",
  "当前邮箱收集与偏好可保存，邮件自动投递未接通，不得声称已向用户发送邮件。",
