@@ -1,5 +1,5 @@
 import type { IntelItem, ItemFeedback, ItemRead, SavedItem } from './types.ts';
-import { FRONTIER_LIMIT, frontierLabel, selectFrontierItems } from './frontier.ts';
+import { FRONTIER_LIMIT, frontierEventTime, frontierLabel, isRecentFrontierItem, selectFrontierItems } from './frontier.ts';
 export type RecommendationScope='all'|'products'|'github'|'ai'|'frontier';
 export interface RecommendationOptions {scope?:RecommendationScope;excludeIds?:string[];readItems?:ItemRead[]}
 type Feature={key:string;label:string;weight:number;topic:boolean};
@@ -23,7 +23,7 @@ export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorit
   const readIds=new Set((options.readItems||[]).map(entry=>entry.itemId));
   const blockedIds=new Set([...(options.excludeIds||[]),...feedback.filter(entry=>entry.action==='not_interested').map(entry=>entry.itemId)]);
   const result=selectFrontierItems(items,at,readIds,blockedIds,Math.min(limit,FRONTIER_LIMIT));
-  return {...result,reasons:Object.fromEntries(result.items.map(item=>[item.id,`近七天${frontierLabel(item)}${readIds.has(item.id)?' · 已读回看':''}`])),feedbackCount:feedback.length,profile:{positiveTopics:[],negativeTopics:[]}};
+  return {...result,reasons:Object.fromEntries(result.items.map(item=>[item.id,`${isRecentFrontierItem(item,at)?'近期动态':'往期精选'} · ${frontierLabel(item)}${readIds.has(item.id)?' · 已读回看':''}`])),feedbackCount:feedback.length,profile:{positiveTopics:[],negativeTopics:[]}};
  }
  const byId=new Map(items.map(item=>[item.id,item]));const choices=new Map(feedback.map(entry=>[entry.itemId,entry.action]));
  const scope=options.scope||'all';const excluded=new Set([...(options.excludeIds||[]),...(options.readItems||[]).map(entry=>entry.itemId)]);
@@ -34,12 +34,12 @@ export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorit
   weights.set(feature.key,(weights.get(feature.key)||0)+signal);if(feature.topic)labels.set(feature.key,feature.label);
  }}
  for(const [key,value] of weights)weights.set(key,Math.max(-8,Math.min(8,value)));
- const eventTime=(item:IntelItem)=>Date.parse(item.publishedAt||item.discoveredAt);
+ const eventTime=frontierEventTime;
  const candidates=[...byId.values()].filter(item=>{
   if(choices.has(item.id)||saved.has(item.id)||excluded.has(item.id))return false;
   if(scope==='products')return item.kind==='product';
   if(scope==='github')return item.kind==='product'&&Boolean(item.github)&&item.stars!=null&&item.stars>0;
-  if(scope==='ai'){const time=eventTime(item);return item.kind==='ai'&&Boolean(item.aiApplication)&&Number.isFinite(time)&&time<=at&&time>=at-7*86400000;}
+  if(scope==='ai'){const time=eventTime(item);return item.kind==='ai'&&Boolean(item.aiApplication)&&Number.isFinite(time)&&time<=at;}
   return true;
  }).map(item=>{
   const features=recommendationFeatures(item);const age=Math.max(0,(at-Date.parse(item.discoveredAt))/86400000);
@@ -54,7 +54,7 @@ export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorit
   else if(scope!=='ai'&&result.length>=2&&result.at(-1)!.category===result.at(-2)!.category){const alternative=candidates.findIndex(value=>value.item.category!==result.at(-1)!.category);if(alternative>=0){index=alternative;exploring=true;}}
   const chosen=candidates.splice(index,1)[0];result.push(chosen.item);
   const match=chosen.features.filter(feature=>(weights.get(feature.key)||0)>0).sort((a,b)=>(weights.get(b.key)||0)*b.weight-(weights.get(a.key)||0)*a.weight)[0];
-  reasons[chosen.item.id]=scope==='ai'?'近七天 AI 应用能力与落地变化':exploring?'换个方向，保留跨行业探索':match?match.topic?`与你留下的「${match.label}」相关`:`与你留下的内容有${match.label==='同一公众号作者'?'相同作者':'相近方向或来源'}`:'探索已收集的产品与设计灵感';
+  reasons[chosen.item.id]=scope==='ai'?`${isRecentFrontierItem(chosen.item,at)?'近期动态':'往期精选'} · AI 应用能力与落地变化`:exploring?'换个方向，保留跨行业探索':match?match.topic?`与你留下的「${match.label}」相关`:`与你留下的内容有${match.label==='同一公众号作者'?'相同作者':'相近方向或来源'}`:'探索已收集的产品与设计灵感';
  }
  const topics=[...labels].map(([key,label])=>({label,value:weights.get(key)||0}));
  const topicList=(positive:boolean)=>[...new Set(topics.filter(value=>positive?value.value>0:value.value<0).sort((a,b)=>positive?b.value-a.value:a.value-b.value).map(value=>value.label))].slice(0,6);

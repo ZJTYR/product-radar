@@ -1,6 +1,7 @@
 import type { IntelItem } from './types.ts';
 
 export const FRONTIER_LIMIT = 6;
+export const FRONTIER_RECENT_DAYS = 7;
 const DAY = 86_400_000;
 const topicOrder = { ai: 0, technology: 1, product: 2 };
 const applicationLabels = { agents: 'Agent 与工作流', knowledge: '知识与记忆', multimodal: '多模态交互', integration: '应用集成', engineering: '应用工程' };
@@ -21,20 +22,30 @@ export function frontierEventTime(item: IntelItem) {
   return Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00+08:00` : value);
 }
 
-export function recentFrontierItems(items: IntelItem[], at: number) {
-  // 最近七个北京时间自然日；不能把未来发布或刚收录的旧新闻当作近期变化。
+export function isRecentFrontierItem(item: IntelItem, at: number) {
   const todayStart = Math.floor((at + 8 * 3_600_000) / DAY) * DAY - 8 * 3_600_000;
+  const time = frontierEventTime(item);
+  return Number.isFinite(time) && time >= todayStart - (FRONTIER_RECENT_DAYS - 1) * DAY && time <= at;
+}
+
+export function frontierItems(items: IntelItem[], at: number) {
+  // 发布日期只决定优先级；保留往期候选，仍排除未来事件与无效日期。
   return [...new Map(items.map(item => [item.id, item])).values()]
     .filter(item => {
       const time = frontierEventTime(item);
-      return frontierTopic(item) !== null && Number.isFinite(time) && time >= todayStart - 6 * DAY && time <= at;
+      return frontierTopic(item) !== null && Number.isFinite(time) && time <= at;
     })
     .sort((a, b) => frontierEventTime(b) - frontierEventTime(a) || a.id.localeCompare(b.id));
 }
 
+export function recentFrontierItems(items: IntelItem[], at: number) {
+  return frontierItems(items, at).filter(item => isRecentFrontierItem(item, at));
+}
+
 export function selectFrontierItems(items: IntelItem[], at: number, readIds: Set<string>, blockedIds: Set<string>, limit = FRONTIER_LIMIT) {
-  const candidates = recentFrontierItems(items, at).filter(item => !blockedIds.has(item.id));
+  const candidates = frontierItems(items, at).filter(item => !blockedIds.has(item.id));
   candidates.sort((a, b) => Number(readIds.has(a.id)) - Number(readIds.has(b.id))
+    || Number(isRecentFrontierItem(b, at)) - Number(isRecentFrontierItem(a, at))
     || topicOrder[frontierTopic(a)!] - topicOrder[frontierTopic(b)!]
     || frontierEventTime(b) - frontierEventTime(a) || a.id.localeCompare(b.id));
   return { items: candidates.slice(0, limit), remaining: candidates.length };
