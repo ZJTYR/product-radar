@@ -28,7 +28,9 @@
 
 产品、设计和AI资讯统一支持可选 `images:[{url,caption,sourceUrl}]`（最多50张）。每天主动查找官网、文档、发布记录和官方仓库中的不同功能界面、流程与场景图，可靠资料丰富时争取5—12张，有更多有价值图片时继续补充，不凑数、不把logo当截图。逐图核验可访问性、MIME、实际尺寸与来源，说明区分真实界面、官方演示、宣传或示意图及已知版本。旧 `image`/`imageCaption` 继续作为兼容封面。正式Vercel工作台负责多图切换与大图查看，本站负责采集和同步字段。
 
-`/api/update-guide` 在已有记录中提供 `imageCount` 与 `missingImages` 辅助补图；它们是已存URL计数，不代表外链实时可用性。先取得完整旧记录，合并原画廊与新图、核验并去重，通过 `/api/catalog` 提交完整IntelItem；保留稳定id、事实、来源和首次发现/实际发布日期，不覆盖历史简报。运行时统一规则为 `lib/collection-policy.ts`，版本2026-10-27.1。
+`/api/update-guide` 在已有记录中提供 `imageCount` 与 `missingImages` 辅助补图；它们是已存URL计数，不代表外链实时可用性。先取得完整旧记录，合并原画廊与新图、核验并去重，通过 `/api/catalog` 提交完整IntelItem；保留稳定id、事实、来源和首次发现/实际发布日期，不覆盖历史简报。运行时统一规则为 `lib/collection-policy.ts`。
+
+每日采集提交本期前逐条核查官方图源，并补查资料库中待核查的旧条目。本期无图时，采集服务要求填写 `missingImageReview`，记录原因、具体核查结果、时间和实际查过的官方页面。已核查的旧条目也通过 `/api/catalog` 保存该字段。补上合适的图片后移除缺图记录。
 
 后台服务访问必须通过 Sites 官方服务访问方式，凭据只在运行时获得，不放在代码、浏览器或任务提示中。`/api/ingest`、`/api/catalog`、`/api/system` 依赖 owner-private 访问边界，不能直接将本站改成公开。
 
