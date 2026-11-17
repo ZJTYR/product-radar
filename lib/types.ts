@@ -3,9 +3,15 @@ export type NewsTopic = 'technology' | 'product';
 export type AIApplication = 'agents' | 'knowledge' | 'multimodal' | 'integration' | 'engineering';
 export interface SourceLink { label: string; url: string }
 export interface IntelImage { url: string; caption: string; sourceUrl: string }
+export interface MissingImageReview {
+  reason: 'no_public_image' | 'no_product_ui' | 'unsuitable_image' | 'source_unavailable';
+  detail: string;
+  checkedAt: string;
+  sources: string[];
+}
 export interface IntelItem {
   id: string; kind: ItemKind; name: string; title: string; subtitle: string;
-  summary: string; category: string; tags: string[]; image?: string; imageCaption?: string; images?: IntelImage[];
+  summary: string; category: string; tags: string[]; image?: string; imageCaption?: string; images?: IntelImage[]; missingImageReview?: MissingImageReview;
   accent: string; website: string; github?: string; repo?: string;
   stars?: number | null; starsCheckedAt?: string; publishedAt?: string | null;
   discoveredAt: string; evidence: '官方资料' | '产品观察' | '官方发布';

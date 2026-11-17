@@ -6,9 +6,15 @@ export const httpUrl = z.string().url().max(2000).refine(v => { try { return ['h
 const imageUrl = z.string().max(2000).refine(v => /^\/images\/[A-Za-z0-9_.\/-]+$/.test(v) && !v.includes('..') || httpUrl.safeParse(v).success, '图片仅允许 /images/ 路径或 http(s) URL');
 export const imageSchema = z.object({ url: imageUrl, caption: z.string().trim().min(1).max(300), sourceUrl: httpUrl }).strict();
 const imageGallerySchema = z.array(imageSchema).max(50).refine(images => new Set(images.map(image => image.url)).size === images.length, '图集不能重复图片 URL');
+const missingImageReviewSchema = z.object({
+ reason: z.enum(['no_public_image', 'no_product_ui', 'unsuitable_image', 'source_unavailable']),
+ detail: z.string().trim().min(1).max(600),
+ checkedAt: timestamp,
+ sources: z.array(httpUrl).min(1).max(10).refine(urls => new Set(urls).size === urls.length, '已核查来源不能重复'),
+}).strict();
 export const itemSchema = z.object({
  id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), kind: z.enum(['product', 'design', 'ai', 'news']), newsTopic: z.enum(['technology', 'product']).optional(), aiApplication: z.enum(['agents','knowledge','multimodal','integration','engineering']).optional(), name: text, title: text, subtitle: text,
- summary: text, category: text, tags: z.array(z.string().max(80)).max(30), image: imageUrl.optional(), images: imageGallerySchema.optional(),
+ summary: text, category: text, tags: z.array(z.string().max(80)).max(30), image: imageUrl.optional(), images: imageGallerySchema.optional(), missingImageReview: missingImageReviewSchema.optional(),
  imageCaption: z.string().trim().min(1).max(300).optional(), scenario: text.optional(),
  accent: z.string().regex(/^#(?:[a-fA-F0-9]{3}|[a-fA-F0-9]{6}|[a-fA-F0-9]{8})$/), website: httpUrl, github: httpUrl.optional(), repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional(),
  stars: z.number().int().nonnegative().nullable().optional(), starsCheckedAt: timestamp.optional(), publishedAt: timestamp.nullable().optional(),
@@ -16,6 +22,8 @@ export const itemSchema = z.object({
  facts: z.array(text).min(1).max(30), audience: text, pain: text, workflow: text, businessModel: text, differentiation: text, opportunity: text,
  designNotes: z.array(text).max(30), caveats: z.array(text).max(30), sources: z.array(z.object({ label: text, url: httpUrl })).min(1).max(30),
 }).strict().superRefine((item, ctx) => {
+ if (item.missingImageReview && (item.image || item.images?.length))
+  ctx.addIssue({code:'custom',path:['missingImageReview'],message:'已有图片，请移除缺图原因'});
  if (item.kind === 'news' && !item.newsTopic) ctx.addIssue({code:'custom',path:['newsTopic'],message:'科技或产品新闻须填写新闻分类'});
  if (item.kind === 'news' && !item.publishedAt) ctx.addIssue({code:'custom',path:['publishedAt'],message:'新闻须保留核验后的实际发布日期'});
 });

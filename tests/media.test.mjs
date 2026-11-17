@@ -45,3 +45,29 @@ test('gallery requires safe URLs, explicit captions and original sources with bo
     assert.equal(accepts([{ ...image, ...patch }]), false, JSON.stringify(patch));
   }
 });
+
+test('missing-image review survives both catalogs and edition schemas without marking imaged or legacy items as reviewed', async () => {
+  const collector = await import('../collector-site/lib/validation.ts');
+  const review = {
+    reason: 'no_product_ui',
+    detail: '官方仓库仅提供 Agent 技能和示例指令。',
+    checkedAt: '2026-11-17T02:00:00.000Z',
+    sources: ['https://example.com/docs/skills'],
+  };
+  for (const schemas of [{ catalogSchema, ingestSchema }, collector]) {
+    const reviewed = { ...item, missingImageReview: review };
+    assert.deepEqual(schemas.catalogSchema.parse({ items: [reviewed] }).items[0].missingImageReview, review);
+    assert.deepEqual(schemas.ingestSchema.parse({ date: '2026-10-22', items: [reviewed] }).items[0].missingImageReview, review);
+    assert.equal(schemas.catalogSchema.parse({ items: [item] }).items[0].missingImageReview, undefined);
+
+    for (const change of [
+      { image: '/images/image.png' },
+      { images: [image] },
+      { missingImageReview: { ...review, detail: '  ' } },
+      { missingImageReview: { ...review, sources: [] } },
+      { missingImageReview: { ...review, checkedAt: 'yesterday' } },
+    ]) {
+      assert.equal(schemas.catalogSchema.safeParse({ items: [{ ...reviewed, ...change }] }).success, false);
+    }
+  }
+});
