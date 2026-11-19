@@ -67,13 +67,13 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
     } finally { if (mountedRef.current && sequence === recommendationSequenceRef.current) setLoading(false); }
   }, []);
 
-  const replaceReadRecommendations = useCallback(async (productIds: ReadonlySet<string>, readIds: ReadonlySet<string>, active: boolean) => {
+  const replaceReadRecommendations = useCallback(async (itemIds: ReadonlySet<string>, readIds: ReadonlySet<string>, active: boolean) => {
     const sequence = ++recommendationSequenceRef.current;
     const slots = active ? recommendations.items.slice(0, VISIBLE_RECOMMENDATIONS) : [];
-    const removed = slots.filter(item => item && productIds.has(item.id)).length;
+    const removed = slots.filter(item => item && itemIds.has(item.id)).length;
     let queue = recommendations.items.slice(slots.length).filter((item): item is IntelItem => Boolean(item && !readIds.has(item.id)));
     let source = recommendations;
-    let remaining = Math.max(0, recommendations.remaining - recommendations.items.filter(item => item && readIds.has(item.id) && (!slots.includes(item) || productIds.has(item.id))).length);
+    let remaining = Math.max(0, recommendations.remaining - recommendations.items.filter(item => item && readIds.has(item.id) && (!slots.includes(item) || itemIds.has(item.id))).length);
     if (active && !slots.length && loading) {
       await loadRecommendations();
       return;
@@ -90,7 +90,7 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
       if (mountedRef.current && sequence === recommendationSequenceRef.current) setError(err instanceof Error ? err.message : "下一条推荐暂时无法读取");
     }
     if (mountedRef.current && sequence === recommendationSequenceRef.current) {
-      const shown = slots.map(item => item && productIds.has(item.id) ? queue.shift() ?? null : item);
+      const shown = slots.map(item => item && itemIds.has(item.id) ? queue.shift() ?? null : item);
       setRecommendations({ ...source, items: [...shown, ...queue], remaining });
       setLoading(false);
     }
