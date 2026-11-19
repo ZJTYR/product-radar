@@ -10,7 +10,7 @@ import { recommendItems, recommendationFeatures } from '../lib/recommendations.t
 import { feedbackSchema, undoSchema, recommendationLimitSchema } from '../lib/validation.ts';
 
 const at=Date.parse('2026-10-26T01:00:00Z');
-const item=(id,category='设计',tags=['布局'],sources=[])=>({...seedItems[0],id,name:id,category,tags,sources,discoveredAt:'2026-10-25T01:00:00Z'});
+const item=(id,category='设计',tags=['布局'],sources=[])=>({...seedItems[0],id,name:id,website:`https://example.com/${id}`,github:undefined,repo:undefined,category,tags,sources,discoveredAt:'2026-10-25T01:00:00Z'});
 const items=[item('design-1'),item('design-2'),item('design-3'),item('design-4'),item('design-5'),item('device-1','硬件',['设备']),item('education-1','教育',['课堂'])];
 async function fixture(run){
  const directory=mkdtempSync(join(tmpdir(),'radar-interest-')); const path=join(directory,'data.sqlite');const db=new RadarDatabase(undefined,path);

@@ -11,7 +11,8 @@ import { filterLibrary } from "@/lib/library-search";
 import type { RadarLocation, RadarView as View } from "@/lib/radar-navigation";
 import type { ReadingAnnotation } from "@/lib/annotations";
 import type { EmailDeliveryView, EmailScheduleView } from "@/lib/email-types";
-import { briefCheckMessage, editionAvailability, githubCheckMessage, latestEdition, readBriefUpdates, resolveHomeFeatured, shanghaiDay } from "@/lib/home-feed";
+import { briefCheckMessage, editionAvailability, githubCheckMessage, latestEdition, readBriefUpdates, resolveHomeFeatured, selectHomeFeatured, shanghaiDay } from "@/lib/home-feed";
+import { expandProductIds, productKeys } from "@/lib/product-identity";
 import { DismissedItemsDialog, RecommendationsPanel, useInterestFeed } from "./interest";
 import { DiscoveryGrid } from "./discovery-grid";
 import type { DiscoveryGridHandle } from "./discovery-grid";
@@ -94,6 +95,7 @@ function RadarWorkspace() {
   const [readItems, setReadItems] = useState<ReadItem[]>([]);
   const [readingReady, setReadingReady] = useState(false);
   const [readingError, setReadingError] = useState("");
+  const [confirmingRead, setConfirmingRead] = useState<string | null>(null);
   const [homeFeatured, setHomeFeatured] = useState<IntelItem | null>(null);
   const [homeFeaturedReadyVersion, setHomeFeaturedReadyVersion] = useState("");
   const [collectionTarget, setCollectionTarget] = useState<CollectionTarget | null>(null);
@@ -103,7 +105,8 @@ function RadarWorkspace() {
   const feedSequenceRef = useRef(0);
   const historySequenceRef = useRef(0);
   const readingSequenceRef = useRef(0);
-  const pendingReadsRef = useRef(new Set<string>());
+  const pendingReadsRef = useRef(new Map<string, Promise<boolean>>());
+  const failedReadsRef = useRef(new Set<string>());
   const knownReadsRef = useRef(new Set<string>());
   const detailRef = useRef<HTMLDialogElement>(null);
   const settingsRef = useRef<HTMLDialogElement>(null);
@@ -111,18 +114,35 @@ function RadarWorkspace() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notify = useCallback((message: string) => { setToast(message); if (toastTimer.current) clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 4800); }, []);
   const interest = useInterestFeed({ onFavorites: setFavorites, notify, mutationLockRef });
-  const mutationBusy = interest.busy || saving !== null || refreshing !== null;
+  const { loadRecommendations } = interest;
+  const mutationBusy = interest.busy || saving !== null || refreshing !== null || confirmingRead !== null;
   const mergeReads = useCallback((items: ReadItem[]) => {
-    for (const item of items) knownReadsRef.current.add(item.itemId);
+    for (const item of items) {
+      knownReadsRef.current.add(item.itemId);
+      failedReadsRef.current.delete(item.itemId);
+    }
     setReadItems(previous => [...new Map([...previous, ...items].map(item => [item.itemId, item])).values()]);
   }, []);
-  const markRead = useCallback(async (itemId: string) => {
-    if (knownReadsRef.current.has(itemId) || pendingReadsRef.current.has(itemId)) return;
-    pendingReadsRef.current.add(itemId);
-    try {
-      const result = await request<{ items: ReadItem[] }>("/api/reading", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId }) });
-      mergeReads(result.items); pendingReadsRef.current.delete(itemId); setReadingError("");
-    } catch (err) { setReadingError(err instanceof Error ? err.message : "已看状态暂时无法保存"); }
+  const markRead = useCallback((itemId: string): Promise<boolean> => {
+    if (knownReadsRef.current.has(itemId)) return Promise.resolve(true);
+    const pending = pendingReadsRef.current.get(itemId);
+    if (pending) return pending;
+    const operation = request<{ items: ReadItem[] }>("/api/reading", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId }),
+    }).then(result => {
+      mergeReads(result.items);
+      if (!failedReadsRef.current.size) setReadingError("");
+      return knownReadsRef.current.has(itemId);
+    }).catch(err => {
+      if (knownReadsRef.current.has(itemId)) return true;
+      failedReadsRef.current.add(itemId);
+      setReadingError(err instanceof Error ? err.message : "已看状态暂时无法保存");
+      return false;
+    }).finally(() => pendingReadsRef.current.delete(itemId));
+    pendingReadsRef.current.set(itemId, operation);
+    return operation;
   }, [mergeReads]);
   const reloadReading = useCallback(async () => {
     const sequence = ++readingSequenceRef.current;
@@ -130,11 +150,14 @@ function RadarWorkspace() {
     try {
       const result = await request<{ items: ReadItem[] }>("/api/reading");
       if (sequence !== readingSequenceRef.current) return false;
-      mergeReads(result.items); setReadingReady(true); setReadingError("");
-      const pending = [...pendingReadsRef.current];
-      pendingReadsRef.current.clear();
-      for (const itemId of pending) await markRead(itemId);
-      return pendingReadsRef.current.size === 0;
+      mergeReads(result.items);
+      const pending = new Set([...pendingReadsRef.current.keys(), ...failedReadsRef.current]);
+      const results = await Promise.all([...pending].map(markRead));
+      if (sequence !== readingSequenceRef.current) return false;
+      setReadingReady(true);
+      const complete = results.every(Boolean);
+      if (complete) setReadingError("");
+      return complete;
     } catch (err) { if (sequence === readingSequenceRef.current) setReadingError(err instanceof Error ? err.message : "阅读状态暂时无法读取"); return false; }
   }, [markRead, mergeReads]);
   const loadFeed = useCallback(async (date = "") => {
@@ -163,6 +186,9 @@ function RadarWorkspace() {
     return () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
   }, [loadFeed, notify, reloadReading]);
   useEffect(() => { const dialog = detailRef.current; if (selected && dialog) { if (!dialog.open) dialog.showModal(); void markRead(selected.id); } if (!selected && dialog?.open) dialog.close(); }, [markRead, selected]);
+  useEffect(() => {
+    if (navigationReady && view === "recommendations") void Promise.resolve().then(loadRecommendations);
+  }, [loadRecommendations, navigationReady, view]);
   const loadEmailStatus = useCallback(async () => {
     setEmailLoading(true); setEmailError("");
     try {
@@ -190,6 +216,8 @@ function RadarWorkspace() {
   const savedIds = useMemo(() => new Set(favorites.map(f => f.itemId)), [favorites]);
   const allItems = view === "history" ? feed?.items || [] : libraryItems;
   const readIds = useMemo(() => new Set(readItems.map(item => item.itemId)), [readItems]);
+  const catalogProductKeys = useMemo(() => productKeys(libraryItems), [libraryItems]);
+  const readProductIds = useMemo(() => expandProductIds(catalogProductKeys, readIds), [catalogProductKeys, readIds]);
   const dismissedIds = useMemo(() => new Set(interest.feedback.filter(entry => entry.action === "not_interested").map(entry => entry.itemId)), [interest.feedback]);
   const editionIds = feed?.meta.editionItemIds;
   const viewItems = !query && (view === "today" || view === "history") && editionIds ? allItems.filter(item => editionIds.includes(item.id)) : allItems;
@@ -214,12 +242,14 @@ function RadarWorkspace() {
   const featured = view === "history" ? historyFeatured : homeFeaturedReady && homeFeatured && !dismissedIds.has(homeFeatured.id) ? homeFeatured : null;
   const productList = view === "history" && !query ? products.filter(item => item.id !== featured?.id) : products;
   const hasVisibleContent = view === "today" && !query || visible.length > 0;
-  const gridBlockedIds = useMemo(() => new Set([...readIds, ...interest.feedback.map(entry => entry.itemId)]), [readIds, interest.feedback]);
+  const gridBlockedIds = useMemo(() => new Set([...readProductIds, ...interest.feedback.map(entry => entry.itemId)]), [readProductIds, interest.feedback]);
   useEffect(() => {
     if (!feed || historyDate || !readingReady || !interest.feedbackReady) return;
     // 当前卡已读或已收藏时留在原位；明确检查、重访或划走后再选择下一条。
-    const next = resolveHomeFeatured(homeFeatured, homeFeaturedReadyVersion === feedVersion, feed.items, feed.meta.editionItemIds, readIds, savedIds, dismissedIds);
-    if (homeFeaturedReadyVersion === feedVersion && next === homeFeatured) return;
+    const sameBatch = homeFeaturedReadyVersion === feedVersion;
+    const reservedIds = sameBatch ? gridRef.current?.visibleItemIds() : undefined;
+    const next = resolveHomeFeatured(homeFeatured, sameBatch, feed.items, feed.meta.editionItemIds, readIds, savedIds, dismissedIds, reservedIds);
+    if (sameBatch && next === homeFeatured) return;
     let active = true;
     void Promise.resolve().then(() => {
       if (!active) return;
@@ -269,10 +299,38 @@ function RadarWorkspace() {
   }, [catalogReady, error, feed, historyDate, libraryItems, loading, navigate, navigationReady, restoreScroll, notify, routeLocation]);
   async function undoInterest() {
     const token = interest.getUndoToken();
-    const done = await interest.undo();
-    if (done && token) gridRef.current?.undo(token);
+    const done = await interest.undo(readProductIds);
+    if (done && token) gridRef.current?.undo(token, readProductIds);
   }
   function openEdition(date: string) { navigate({ view: "history", date, item: "", annotation: "" }); }
+
+  async function confirmProductRead(item: IntelItem) {
+    if (mutationLockRef.current) return;
+    mutationLockRef.current = true;
+    setConfirmingRead(item.id);
+    try {
+      if (!await markRead(item.id)) {
+        notify("已读状态未确认，请重试");
+        return;
+      }
+      const aliases = expandProductIds(catalogProductKeys, [item.id]);
+      const excluded = expandProductIds(catalogProductKeys, knownReadsRef.current);
+      const grid = gridRef.current;
+      if (!loadedEditionRef.current && homeFeatured && aliases.has(homeFeatured.id)) {
+        const replacement = selectHomeFeatured(libraryItems, editionIds, excluded, savedIds, dismissedIds, grid?.visibleItemIds());
+        setHomeFeatured(replacement);
+      }
+      await Promise.all([
+        grid?.replaceRead(aliases, excluded),
+        interest.replaceReadRecommendations(aliases, excluded, view === "recommendations"),
+      ]);
+      closeDetail(item.id);
+      notify("已读，可在全部产品中回看");
+    } finally {
+      mutationLockRef.current = false;
+      setConfirmingRead(null);
+    }
+  }
 
   async function toggleFavorite(item: IntelItem) {
     if (mutationLockRef.current || !interest.feedbackReady) return;
@@ -390,9 +448,9 @@ function RadarWorkspace() {
     {view === "history" && <section className="history-section"><div className="section-heading"><div><span className="section-mark"><CalendarDays size={16} /></span><h2>简报档案</h2></div><span className="muted">按日期查看 · 已读表示已打开该期</span></div><div className="history-days">{history.length ? history.map(record => <div className={`history-day ${historyDate === record.date ? "chosen" : ""}`} key={record.date}><button className="history-day-open" onClick={() => void openEdition(record.date)} aria-current={historyDate === record.date ? "date" : undefined}><CalendarDays size={19} /><strong>{record.date}</strong><span>{record.count} 条内容</span><span className={`reading-badge ${record.hasUpdates ? "has-updates" : record.readAt ? "is-read" : "is-unread"}`}>{record.hasUpdates ? <RefreshCw size={12} /> : record.readAt ? <Check size={12} /> : <i />}{record.hasUpdates ? "有更新" : record.readAt ? "已读" : "未读"}</span></button>{record.readAt && <button className="history-mark-unread" title="标为未读" aria-label={`将 ${record.date} 简报标为未读`} disabled={historySaving === record.date} onClick={() => void saveEditionRead(record.date, false)}>{historySaving === record.date ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />}</button>}</div>) : <p className="muted">第一份简报将在本次更新后归档。</p>}</div></section>}
     {view === "saved" && <div className="collection-toolbar"><div className="collection-tabs">{["全部收藏", ...collectionNames].map(name => <button key={name} onClick={() => setCollectionFilter(name)} className={collectionFilter === name ? "selected" : ""}>{name}</button>)}</div><button className="button secondary" onClick={exportFavorites} disabled={!favorites.length || readingNotes.loading || Boolean(readingNotes.error)}><ArrowDownToLine size={14} />导出收藏</button></div>}
     {loading || !navigationReady ? <div className="loading-grid" aria-label="正在加载简报"><div className="skeleton skeleton-feature" /><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div> : error ? <div className="empty-state"><CircleHelp size={34} /><h2>资讯暂时没有加载出来</h2><p>{error}</p><button className="button primary" onClick={() => void loadFeed(historyDate)}>重新加载</button></div> : unresolvedReading ? <div className="empty-state"><CircleHelp size={30} /><h2>阅读状态尚未核对</h2><p>{readingError || "正在读取阅读记录，暂不判断资料是否已读。"}</p><button className="button secondary" onClick={() => void reloadReading()}>重新核对阅读记录</button></div> : !hasVisibleContent ? <div className="empty-state">{view === "saved" ? <Bookmark size={34} /> : <Search size={34} />}<h2>{query ? "还没有找到匹配的内容" : view === "saved" ? "给下一个好想法留个位置" : "暂时没有待展示的内容"}</h2><p>{query ? "试试产品名称、行业、业务场景或设计风格。" : view === "saved" ? "点击卡片上的收藏图标，就能把喜欢的内容保存在这里。" : "可以到为你推荐继续探索，也可以在已划走中恢复内容。"}</p><button className="button primary" onClick={() => libraryView ? changeLibraryFilter({ query: "", category: "", read: "all", topic: "all", range: "all", sort: "recent" }) : query ? setQuery("") : view === "saved" ? changeView("today") : changeView("recommendations")}>{libraryView ? "重置筛选" : query ? "清空搜索" : view === "saved" ? "去发现好产品" : "去刷灵感"}<ArrowRight size={15} /></button></div> : <>
-    {(view === "today" || view === "history" && featured) && !query && <section className="featured-section"><div className="section-heading"><div><span className="section-mark"><Compass size={16} /></span><h2>{view === "history" ? "本期产品解读" : "先看懂一个产品"}</h2><span className="section-description">它是什么 · 为什么有人需要 · 有什么价值</span></div><button className="text-link" onClick={() => changeView("products")}>全部拆解 <ArrowRight size={14} /></button></div>{featured ? <article className="featured-card" data-item-id={featured.id}><button className="featured-image" onClick={() => openItem(featured)}><Visual item={featured} large /></button><div className="featured-body"><div className="featured-top"><span className="pill green"><span />{libraryFeatured ? "资料库精选" : "本期重点"} · PRODUCT PICK</span><div className="featured-feedback">{dismissButton(featured)}{bookmark(featured)}</div></div>{libraryFeatured && <p className="featured-origin">收录于 {new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric" }).format(new Date(featured.discoveredAt))} · 来自已收集资料</p>}<div className="featured-name">{featured.name}<span>{featured.category}</span></div><button className="featured-title" onClick={() => openItem(featured)}><h2>{featured.title}</h2></button><p>{featured.summary}</p><div className="featured-insight"><Lightbulb size={17} /><span><strong>产品价值</strong>{featured.differentiation}</span></div><div className="featured-footer"><span>{featured.github ? <Github size={15} /> : <Compass size={15} />}{featured.stars != null ? `${stars(featured.stars)} Stars` : featured.evidence}<span className="footer-dot">·</span><Clock3 size={13} />{featured.readMinutes} 分钟</span><button onClick={() => openItem(featured)}>阅读拆解 <ArrowUpRight size={17} /></button></div></div></article> : <div className="featured-placeholder" role="status">{featuredStateError ? <><CircleHelp size={28} /><h3>暂时无法核对产品阅读状态</h3><p>请重新读取阅读、收藏与偏好，再为你选择下一款产品。</p><button className="button secondary" disabled={mutationBusy} onClick={() => void refreshBrief()}>重新核对</button></> : !homeFeaturedReady || !readingReady || !interest.feedbackReady ? <><Loader2 size={26} className="spin" /><h3>正在准备产品解读</h3><p>正在核对本期内容与阅读记录。</p></> : <><Compass size={28} /><h3>暂时没有新的产品解读</h3><p>本期与资料库中的产品已看完、已收藏或已划走，新的采集完成后会继续补充。</p><button className="button secondary" onClick={() => changeView("products")}>查看全部产品 <ArrowRight size={14} /></button></>}</div>}</section>}
+    {(view === "today" || (view === "history" && featured)) && !query && <section className="featured-section"><div className="section-heading"><div><span className="section-mark"><Compass size={16} /></span><h2>{view === "history" ? "本期产品解读" : "先看懂一个产品"}</h2><span className="section-description">它是什么 · 为什么有人需要 · 有什么价值</span></div><button className="text-link" onClick={() => changeView("products")}>全部拆解 <ArrowRight size={14} /></button></div>{featured ? <article className="featured-card" data-item-id={featured.id}><button className="featured-image" onClick={() => openItem(featured)}><Visual item={featured} large /></button><div className="featured-body"><div className="featured-top"><span className="pill green"><span />{libraryFeatured ? "资料库精选" : "本期重点"} · PRODUCT PICK</span><div className="featured-feedback">{dismissButton(featured)}{bookmark(featured)}</div></div>{libraryFeatured && <p className="featured-origin">收录于 {new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric" }).format(new Date(featured.discoveredAt))} · 来自已收集资料</p>}<div className="featured-name">{featured.name}<span>{featured.category}</span></div><button className="featured-title" onClick={() => openItem(featured)}><h2>{featured.title}</h2></button><p>{featured.summary}</p><div className="featured-insight"><Lightbulb size={17} /><span><strong>产品价值</strong>{featured.differentiation}</span></div><div className="featured-footer"><span>{featured.github ? <Github size={15} /> : <Compass size={15} />}{featured.stars != null ? `${stars(featured.stars)} Stars` : featured.evidence}<span className="footer-dot">·</span><Clock3 size={13} />{featured.readMinutes} 分钟</span><button onClick={() => openItem(featured)}>阅读拆解 <ArrowUpRight size={17} /></button></div></div></article> : <div className="featured-placeholder" role="status">{featuredStateError ? <><CircleHelp size={28} /><h3>暂时无法核对产品阅读状态</h3><p>请重新读取阅读、收藏与偏好，再为你选择下一款产品。</p><button className="button secondary" disabled={mutationBusy} onClick={() => void refreshBrief()}>重新核对</button></> : !homeFeaturedReady || !readingReady || !interest.feedbackReady ? <><Loader2 size={26} className="spin" /><h3>正在准备产品解读</h3><p>正在核对本期内容与阅读记录。</p></> : <><Compass size={28} /><h3>暂时没有新的产品解读</h3><p>这个位置暂时没有可补的产品。可以继续浏览产品发现，或到全部产品回看。</p><button className="button secondary" onClick={() => changeView("products")}>查看全部产品 <ArrowRight size={14} /></button></>}</div>}</section>}
     {view === "saved" ? <section className="saved-grid">{visible.map(item => <div key={item.id}>{item.kind === "design" ? designCard(item) : productCard(item)}<div className="saved-item-tools">{collectionButton(item)}<button className="saved-notes-trigger" onClick={() => readingNotes.openNotebook(item)}><BookOpen size={14} />笔记{readingNotes.notes.some(note => note.itemId === item.id) ? ` (${readingNotes.notes.filter(note => note.itemId === item.id).length})` : ""}</button></div></div>)}</section> : <>
-    {view === "today" && !query && <><FrontierNews libraryItems={libraryItems} readIds={readIds} savedIds={savedIds} dismissedIds={dismissedIds} disabled={mutationBusy || !interest.feedbackReady} refreshKey={feedVersion} onAll={() => changeView("frontier")} onOpen={openItem} onReadSource={item => void markRead(item.id)} onFeedback={interest.submit} /><DiscoveryGrid ref={gridRef} refreshKey={feedVersion} catalogItems={libraryItems} excludedId={featured?.id} blockedIds={gridBlockedIds} savedIds={savedIds} disabled={mutationBusy || !interest.feedbackReady} ready={readingReady && interest.feedbackReady && homeFeaturedReady} onOpen={openItem} onFeedback={interest.submit} getUndoToken={interest.getUndoToken} onUndo={undoInterest} renderVisual={item => <Visual item={item} />} onLibrary={() => changeView("products")} /></>}
+    {view === "today" && !query && <><FrontierNews libraryItems={libraryItems} readIds={readIds} savedIds={savedIds} dismissedIds={dismissedIds} disabled={mutationBusy || !interest.feedbackReady} refreshKey={feedVersion} onAll={() => changeView("frontier")} onOpen={openItem} onReadSource={item => void markRead(item.id)} onFeedback={interest.submit} /><DiscoveryGrid ref={gridRef} refreshKey={feedVersion} catalogItems={libraryItems} excludedId={featured?.id} productKeys={catalogProductKeys} blockedIds={gridBlockedIds} savedIds={savedIds} disabled={mutationBusy || !interest.feedbackReady} ready={readingReady && interest.feedbackReady && homeFeaturedReady} onOpen={openItem} onFeedback={interest.submit} getUndoToken={interest.getUndoToken} onUndo={undoInterest} renderVisual={item => <Visual item={item} />} onLibrary={() => changeView("products")} /></>}
     {productList.length > 0 && view !== "design" && (view !== "today" || query) && <section className="content-section"><div className="section-heading"><div><span className="section-mark"><LayoutGrid size={16} /></span><h2>{query ? "搜索结果 · 产品" : view === "products" ? "全部产品发现" : "本期产品"}</h2><span className="section-description">软件、硬件与消费产品 · 看懂需求与价值</span></div><span className="section-counter">{productList.length} 个产品</span></div><div className="product-grid">{productList.map(productCard)}</div></section>}
     {designs.length > 0 && <section className="content-section"><div className="section-heading"><div><span className="section-mark orange"><Sparkles size={16} /></span><h2>让灵感发生</h2><span className="section-description">好看的背后，有值得学习的设计</span></div>{view !== "design" && <button className="text-link" onClick={() => changeView("design")}>更多灵感 <ArrowRight size={14} /></button>}</div><div className="design-grid">{designs.map(designCard)}</div></section>}
     {aiItems.length > 0 && (view !== "today" || query) && view !== "design" && view !== "products" && <section className="content-section"><div className="section-heading"><div><span className="section-mark purple"><Sparkles size={16} /></span><h2>{view === "history" ? "本期前沿动态" : "前沿资讯资料"}</h2><span className="section-description">只关心会影响产品的变化</span></div><span className="muted small">{aiItems.length} 条动态</span></div><div className="ai-list">{aiItems.map(item => <article className="ai-card" key={item.id}><div className="ai-brand" style={{ background: item.accent }}>{item.name.slice(0, 1)}</div><button className="ai-content" onClick={() => openItem(item)}><div className="card-kicker"><span>{item.name}</span><span>{item.evidence}</span>{item.publishedAt && <span>{day(item.publishedAt)} 发布</span>}</div><h3>{item.title}</h3><p>{item.summary}</p><span className="ai-action">产品机会 <ArrowRight size={13} /></span></button><div className="ai-feedback">{bookmark(item)}{dismissButton(item)}</div></article>)}</div></section>}
@@ -402,12 +460,25 @@ function RadarWorkspace() {
     <footer className="page-footer"><div><Radio size={15} /><span>拾光</span><span className="footer-dot">·</span><span>让每一次发现，都有下一步</span></div><span>{feed?.meta.scheduleStatus ? `${feed.meta.scheduleStatus} · ` : ""}{feed?.meta.updatedAt ? `资料更新于 ${day(feed.meta.updatedAt)} ${time(feed.meta.updatedAt)}` : "资料来自公开来源"}<span className="footer-dot">·</span>商业判断为分析推断</span></footer>
     </main></div>
     <dialog className="detail-dialog" ref={detailRef} aria-labelledby="detail-heading" onCancel={event => { if (event.target === event.currentTarget) { event.preventDefault(); closeDetail(); } }} onClick={event => { if (event.target === event.currentTarget) closeDetail(); }}>{selected && <div className="dialog-inner" key={selected.id}>
-      <div className="dialog-top"><span><span className="live-dot" />{selected.kind === "design" ? "设计灵感" : (selected.kind === "ai" || selected.kind === "news") ? "前沿动态" : "产品解读"}</span><button className="icon-button" onClick={closeDetail} aria-label="关闭详情"><X size={22} /></button></div>
+      <div className="dialog-top"><span><span className="live-dot" />{selected.kind === "design" ? "设计灵感" : (selected.kind === "ai" || selected.kind === "news") ? "前沿动态" : "产品解读"}</span><button className="icon-button" onClick={() => closeDetail()} aria-label="关闭详情"><X size={22} /></button></div>
       <div className="detail-scroll"><ReadingAnnotations key={`${selected.id}:${selectedSourceDate || "live"}`} item={selected} sourceDate={selectedSourceDate} focusNoteId={routeLocation.annotation || undefined}>
         <div className="card-kicker"><span>{selected.category}</span><span>{selected.evidence}</span>{selected.stars != null && <span><Star size={12} />{stars(selected.stars)} Stars</span>}</div>
         <h2>{selected.name}</h2><h3 className="detail-title" id="detail-heading"><AnnotatedText blockId="title" text={selected.title} /></h3>
         <p className="detail-summary"><AnnotatedText blockId="summary" text={selected.summary} /></p>
-        <div className="detail-links"><a className="button primary" href={selected.website} target="_blank" rel="noopener noreferrer">{selected.kind === "product" ? "了解 / 体验产品" : "查看官方介绍"} <ArrowUpRight size={15} /></a>{selected.github && <a className="button secondary" href={selected.github} target="_blank" rel="noopener noreferrer"><Github size={15} />GitHub</a>}{dismissButton(selected)}{bookmark(selected)}{collectionButton(selected)}</div>
+        <div className="detail-links">
+          <a className="button primary" href={selected.website} target="_blank" rel="noopener noreferrer">{selected.kind === "product" ? "了解 / 体验产品" : "查看官方介绍"} <ArrowUpRight size={15} /></a>
+          {selected.github && <a className="button secondary" href={selected.github} target="_blank" rel="noopener noreferrer"><Github size={15} />GitHub</a>}
+          <div className="detail-reading-actions">
+            {dismissButton(selected)}
+            {selected.kind === "product" && <button type="button" className="button secondary detail-read-button"
+              title="从推荐中移走，可在全部产品中回看" disabled={mutationBusy} aria-busy={confirmingRead === selected.id}
+              onClick={() => void confirmProductRead(selected)}>
+              {confirmingRead === selected.id ? <Loader2 size={15} className="spin" aria-hidden="true" /> : <Check size={15} aria-hidden="true" />}
+              已读
+            </button>}
+          </div>
+          {bookmark(selected)}{collectionButton(selected)}
+        </div>
         <ImageGallery item={selected} />
         <div className="detail-reading">
           <section className="analysis-section"><h4><span>01</span>{selected.kind === "product" ? "谁会用它" : "这与谁有关"}</h4><p><AnnotatedText blockId="audience" text={selected.audience} /></p></section>

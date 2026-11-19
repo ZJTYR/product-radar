@@ -13,7 +13,7 @@ import { editionReadSchema, itemReadSchema, itemSchema, recommendationExcludeSch
 
 const at=Date.parse('2026-10-26T08:30:00Z');
 const version='2026-10-26T00:30:00.000Z';
-const makeItem=(id,overrides={})=>({...seedItems[0],id,name:id,kind:'product',category:'知识协作',tags:['文档'],discoveredAt:'2026-10-25T00:30:00Z',publishedAt:null,...overrides});
+const makeItem=(id,overrides={})=>({...seedItems[0],id,name:id,kind:'product',website:`https://example.com/${id}`,github:undefined,repo:undefined,category:'知识协作',tags:['文档'],discoveredAt:'2026-10-25T00:30:00Z',publishedAt:null,...overrides});
 const items=[
  makeItem('tool-one',{github:'https://github.com/example/one',stars:100}),
  makeItem('tool-two',{github:'https://github.com/example/two',stars:200}),
@@ -84,6 +84,25 @@ test('grid scopes and exclusions reserve unseen candidates without adding negati
  assert.deepEqual(new Set(github.items.map(item=>item.id)),new Set(['tool-one','tool-two']));
  const excluded=recommendItems(items,[{itemId:'tool-one',action:'not_interested',updatedAt:version}],[{itemId:'tool-two'}],24,at,{scope:'github'});
  assert.equal(excluded.remaining,0);
+});
+
+test('product reads and reserved slots exclude the same product across scopes and preserve its news', () => {
+ const original=makeItem('home-assistant',{website:'https://www.home-assistant.io/',repo:'Home-Assistant/Core',github:'https://github.com/home-assistant/core',stars:100});
+ const rewritten=makeItem('home-assistant-revised',{website:'https://home-assistant.io/new-intro',github:'https://github.com/home-assistant/core/releases',stars:100});
+ const withoutRepo=makeItem('home-assistant-short',{website:'https://home-assistant.io/?utm_source=brief'});
+ const event=makeItem('community-market',{kind:'news',website:original.website,repo:original.repo,newsTopic:'product',publishedAt:'2026-10-26T01:00:00Z'});
+ const other=makeItem('another-product',{website:'https://home-assistant.io/another-product',repo:'sample/other',github:'https://github.com/sample/other',stars:50});
+ const catalog=[original,rewritten,withoutRepo,event,other];
+ const readItems=[{itemId:original.id,readAt:version}];
+ const baseline=recommendItems(catalog,[],[],24,at,{scope:'products'});
+ assert.equal(baseline.remaining,2);
+ for(const scope of ['products','github','all']){
+  const result=recommendItems(catalog,[],[],24,at,{scope,readItems});
+  assert.deepEqual(new Set(result.items.map(item=>item.id)),new Set(scope==='all'?[other.id,event.id]:[other.id]));
+  assert.equal(result.feedbackCount,0);
+ }
+ assert.deepEqual(recommendItems(catalog,[],[],24,at,{scope:'products',excludeIds:[withoutRepo.id]}).items.map(item=>item.id),[other.id]);
+ assert.deepEqual(recommendItems(catalog,[],[],6,at,{scope:'frontier',readItems}).items.map(item=>item.id),[event.id]);
 });
 
 test('AI frontier requires an explicit application layer tag and retains dated historical events after recent ones',()=>{

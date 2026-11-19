@@ -8,7 +8,7 @@ import { seedItems } from '../lib/seed.ts';
 import { readFeedMetadata } from '../lib/feed-metadata.ts';
 import { briefCheckMessage, editionAvailability, githubCheckMessage, latestEdition, readBriefUpdates, resolveHomeFeatured, selectHomeFeatured, shanghaiDay } from '../lib/home-feed.ts';
 
-const item = (id, extra = {}) => ({ ...seedItems[0], id, name: id, kind: 'product', featured: false, discoveredAt: '2026-10-25T00:00:00Z', ...extra });
+const item = (id, extra = {}) => ({ ...seedItems[0], id, name: id, kind: 'product', website: `https://example.com/${id}`, github: undefined, repo: undefined, featured: false, discoveredAt: '2026-10-25T00:00:00Z', ...extra });
 const catalog = [item('library-old'), item('edition'), item('pick', { featured: true }), item('library-new', { discoveredAt: '2026-10-26T00:00:00Z' }), item('design', { kind: 'design' }), item('ai', { kind: 'ai' })];
 const editionIds = ['edition', 'pick', 'design', 'ai'];
 const empty = () => new Set();
@@ -49,6 +49,18 @@ test('reading and saving keep the current card until an explicit refresh, while 
   assert.equal(current, null);
   // 恢复划走记录之后，空模块可以重新选择真实候选。
   assert.equal(resolveHomeFeatured(current, true, catalog, editionIds, read, saved, new Set(['edition', 'library-old'])).id, 'library-new');
+});
+
+test('replacing the featured product skips read aliases and keeps other visible product slots reserved', () => {
+  const read = item('read', { website: 'https://www.example.com/read/?utm_source=edition' });
+  const alias = item('revised', { website: 'http://example.com/read', featured: true });
+  const gridCard = item('grid');
+  const gridAlias = item('grid-copy', { website: gridCard.website });
+  const available = item('replacement');
+  const items = [read, alias, gridCard, gridAlias, available];
+  const reserved = [gridCard.id];
+  assert.equal(selectHomeFeatured(items, [alias.id, gridAlias.id], new Set([read.id]), empty(), empty(), reserved)?.id, available.id);
+  assert.equal(resolveHomeFeatured(null, true, items.slice(0, -1), undefined, new Set([read.id]), empty(), empty(), reserved), null);
 });
 
 test('Shanghai calendar boundaries are independent of host timezone and distinguish missing, current and pending editions', () => {

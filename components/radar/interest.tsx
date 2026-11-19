@@ -19,6 +19,8 @@ export interface RecommendationResult {
   profile: { positiveTopics: string[]; negativeTopics: string[] };
 }
 
+type RecommendationDeck = Omit<RecommendationResult, "items"> & { items: (IntelItem | null)[] };
+const VISIBLE_RECOMMENDATIONS = 4;
 const EMPTY_RECOMMENDATIONS: RecommendationResult = { items: [], reasons: {}, remaining: 0, feedbackCount: 0, profile: { positiveTopics: [], negativeTopics: [] } };
 
 async function interestRequest<T>(path: string, options?: RequestInit): Promise<T> {
@@ -43,7 +45,7 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
   const [feedback, setFeedback] = useState<ReadingFeedback[]>([]);
   const [feedbackReady, setFeedbackReady] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
-  const [recommendations, setRecommendations] = useState<RecommendationResult>(EMPTY_RECOMMENDATIONS);
+  const [recommendations, setRecommendations] = useState<RecommendationDeck>(EMPTY_RECOMMENDATIONS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -65,23 +67,44 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
     } finally { if (mountedRef.current && sequence === recommendationSequenceRef.current) setLoading(false); }
   }, []);
 
+  const replaceReadRecommendations = useCallback(async (productIds: ReadonlySet<string>, readIds: ReadonlySet<string>, active: boolean) => {
+    const sequence = ++recommendationSequenceRef.current;
+    const slots = active ? recommendations.items.slice(0, VISIBLE_RECOMMENDATIONS) : [];
+    const removed = slots.filter(item => item && productIds.has(item.id)).length;
+    let queue = recommendations.items.slice(slots.length).filter((item): item is IntelItem => Boolean(item && !readIds.has(item.id)));
+    let source = recommendations;
+    let remaining = Math.max(0, recommendations.remaining - recommendations.items.filter(item => item && readIds.has(item.id) && (!slots.includes(item) || productIds.has(item.id))).length);
+    if (active && !slots.length && loading) {
+      await loadRecommendations();
+      return;
+    }
+    try {
+      if (removed > queue.length) {
+        const params = new URLSearchParams({ limit: "12", exclude: slots.flatMap(item => item ? [item.id] : []).join(",") });
+        const fresh = await interestRequest<RecommendationResult>(`/api/recommendations?${params}`);
+        queue = fresh.items.filter(item => !readIds.has(item.id));
+        remaining = fresh.remaining + slots.filter(Boolean).length - removed;
+        source = { ...fresh, reasons: { ...recommendations.reasons, ...fresh.reasons } };
+      }
+    } catch (err) {
+      if (mountedRef.current && sequence === recommendationSequenceRef.current) setError(err instanceof Error ? err.message : "下一条推荐暂时无法读取");
+    }
+    if (mountedRef.current && sequence === recommendationSequenceRef.current) {
+      const shown = slots.map(item => item && productIds.has(item.id) ? queue.shift() ?? null : item);
+      setRecommendations({ ...source, items: [...shown, ...queue], remaining });
+      setLoading(false);
+    }
+  }, [loadRecommendations, loading, recommendations]);
+
   useEffect(() => {
     mountedRef.current = true;
     const feedbackVersion = ++feedbackSequenceRef.current;
-    const recommendationVersion = ++recommendationSequenceRef.current;
     void interestRequest<FeedbackResult>("/api/feedback").then(result => {
       if (mountedRef.current && feedbackVersion === feedbackSequenceRef.current) {
         setFeedback(result.feedback); onFavorites(result.favorites); setFeedbackReady(true);
       }
     }).catch(err => {
       if (mountedRef.current && feedbackVersion === feedbackSequenceRef.current) setFeedbackError(err instanceof Error ? err.message : "阅读偏好暂时无法读取");
-    });
-    void interestRequest<RecommendationResult>("/api/recommendations?limit=12").then(result => {
-      if (mountedRef.current && recommendationVersion === recommendationSequenceRef.current) setRecommendations(result);
-    }).catch(err => {
-      if (mountedRef.current && recommendationVersion === recommendationSequenceRef.current) setError(err instanceof Error ? err.message : "推荐暂时无法读取");
-    }).finally(() => {
-      if (mountedRef.current && recommendationVersion === recommendationSequenceRef.current) setLoading(false);
     });
     return () => { mountedRef.current = false; };
   }, [onFavorites]);
@@ -91,7 +114,7 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
     setFeedback(result.feedback); setFeedbackReady(true); setFeedbackError(""); onFavorites(result.favorites);
     const consumed = new Set([...result.feedback.map(entry => entry.itemId), ...result.favorites.map(entry => entry.itemId)]);
     setRecommendations(previous => {
-      const nextItems = previous.items.filter(item => !consumed.has(item.id));
+      const nextItems = previous.items.filter(item => !item || !consumed.has(item.id));
       return { ...previous, items: nextItems, remaining: Math.max(0, previous.remaining - (previous.items.length - nextItems.length)), feedbackCount: result.feedback.length };
     });
   }, [onFavorites]);
@@ -152,7 +175,7 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
     finally { mutationLockRef.current = false; if (mountedRef.current) setBusy(false); }
   }, [applyResult, feedbackReady, loadRecommendations, mutationLockRef, notify, recoverUncertainWrite]);
 
-  const undo = useCallback(async () => {
+  const undo = useCallback(async (readIds: ReadonlySet<string>) => {
     if (mutationLockRef.current || !undoToken) return false;
     mutationLockRef.current = true; setBusy(true); ++recommendationSequenceRef.current;
     try {
@@ -160,11 +183,11 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
       if (!mountedRef.current) return false;
       applyResult(result); setUndoToken(null); undoTokenRef.current = null;
       const restored = undoItemRef.current;
-      const isEligible = restored && !result.feedback.some(entry => entry.itemId === restored.id) && !result.favorites.some(entry => entry.itemId === restored.id);
+      const isEligible = restored && !readIds.has(restored.id) && !result.feedback.some(entry => entry.itemId === restored.id) && !result.favorites.some(entry => entry.itemId === restored.id);
       notify("已撤销上一次选择");
       await loadRecommendations();
       if (isEligible && mountedRef.current) setRecommendations(previous => {
-        const items = [restored, ...previous.items.filter(item => item.id !== restored.id)];
+        const items = [restored, ...previous.items.filter(item => item?.id !== restored.id)];
         return { ...previous, items, remaining: Math.max(items.length, previous.remaining) };
       });
       return true;
@@ -189,7 +212,7 @@ export function useInterestFeed({ onFavorites, notify, mutationLockRef }: {
   }, [applyResult, feedbackReady, loadRecommendations, mutationLockRef, notify, recoverUncertainWrite]);
 
   const getUndoToken = useCallback(() => undoTokenRef.current, []);
-  return { getUndoToken, feedback, feedbackReady, feedbackError, recommendations, loading, error, busy, undoToken, submit, undo, restore, reconcile, reloadState: reconcileLocked, loadRecommendations };
+  return { getUndoToken, feedback, feedbackReady, feedbackError, recommendations, loading, error, busy, undoToken, submit, undo, restore, reconcile, reloadState: reconcileLocked, loadRecommendations, replaceReadRecommendations };
 }
 
 function DiscoveryImage({ item }: { item: IntelItem }) {
@@ -252,14 +275,30 @@ function DiscoveryChoices({ item, disabled, onFeedback, mobile = false }: {
 function LightbulbIcon() { return <Sparkles size={17} aria-hidden="true" />; }
 
 export function RecommendationsPanel({ data, loading, error, disabled, retryDisabled, undoToken, onFeedback, onOpen, onUndo, onRetry, onManage, onSaved }: {
-  data: RecommendationResult; loading: boolean; error: string; disabled: boolean; retryDisabled: boolean; undoToken: string | null;
+  data: RecommendationDeck; loading: boolean; error: string; disabled: boolean; retryDisabled: boolean; undoToken: string | null;
   onFeedback: (item: IntelItem, action: InterestAction) => Promise<boolean>; onOpen: (item: IntelItem) => void;
   onUndo: () => Promise<void>; onRetry: () => Promise<void>; onManage: () => void; onSaved: () => void;
 }) {
   const current = data.items[0];
+  const next = data.items.slice(1, VISIBLE_RECOMMENDATIONS);
+  const hasNext = next.some(Boolean);
   return <section className="recommendation-section" aria-label="为你推荐"><div className="recommendation-toolbar"><div><span className="pill green"><Sparkles size={13} />按你的选择推荐</span><p>来自已收集的资料库 · {data.remaining} 条待探索</p></div><div className="recommendation-tools"><button className="button secondary" disabled={disabled || !undoToken} onClick={() => void onUndo()}><RotateCcw size={14} />撤销上一次</button><button className="button secondary" onClick={onManage}><EyeOff size={14} />已划走</button></div></div>
     {error && <div className="inline-warning recommendation-error" role="alert"><span>{current ? `推荐排序暂时无法更新：${error}` : error}</span><button disabled={retryDisabled || loading} onClick={() => void onRetry()}>重新读取</button></div>}
-    {loading && !current ? <div className="recommendation-loading" role="status"><Loader2 className="spin" size={24} /><strong>正在挑选下一条灵感</strong></div> : current ? <div className="discovery-layout"><div className="discovery-stage"><DiscoveryCard key={current.id} item={current} reason={data.reasons[current.id]} disabled={disabled || loading} onFeedback={onFeedback} onOpen={onOpen} /><p className="swipe-help"><ArrowLeft size={14} />左划不感兴趣<span>·</span>右划感兴趣<ArrowRight size={14} /><span className="desktop-only">也可以聚焦卡片后使用 ← / →</span></p><div className="recommendation-live" role="status" aria-live="polite">{disabled ? "正在保存选择，请稍候" : `当前推荐：${current.name}`}</div></div><aside className="discovery-aside"><div className="recommendation-explainer"><Sparkles size={20} /><h3>把好灵感留下来</h3><p>根据你的选择调整主题、产品类型与可识别来源的顺序，同时保留新方向。</p><div className="interest-explainer-row"><Heart size={16} /><span><strong>感兴趣</strong>加入收藏，便于分类与写备注</span></div><div className="interest-explainer-row"><X size={16} /><span><strong>不感兴趣</strong>移走这一条，自动补下一条</span></div><div className="interest-explainer-row"><RotateCcw size={16} /><span><strong>随时调整</strong>可以撤销，也能恢复已划走内容</span></div>{data.profile.positiveTopics.length > 0 && <div className="interest-topics"><span>最近留下的方向</span><div className="card-tags">{data.profile.positiveTopics.slice(0, 4).map(topic => <span key={topic}>{topic}</span>)}</div></div>}<small>已记录 {data.feedbackCount} 条阅读选择。一次划走不会屏蔽整个主题或作者。</small></div>{data.items.length > 1 && <div className="discovery-next"><h3>接下来还可以看看</h3>{data.items.slice(1, 4).map(item => <button key={item.id} onClick={() => onOpen(item)}><span><strong>{item.name}</strong><small>{item.category}</small></span><ArrowUpRight size={15} /></button>)}</div>}</aside></div> : !error ? <div className="empty-state recommendation-empty"><Check size={34} /><h2>这一轮灵感已看完</h2><p>已有资料中暂时没有未处理的推荐。每天采集更新后会继续补充，也可以恢复已划走的内容重新看看。</p><div><button className="button primary" onClick={onSaved}><Bookmark size={15} />查看留下的灵感</button><button className="button secondary" onClick={onManage}><EyeOff size={15} />管理已划走</button></div></div> : <div className="empty-state recommendation-empty"><CircleHelp size={34} /><h2>下一条灵感暂时没有读取出来</h2><p>你的收藏与已保存选择会保留。请稍后重试。</p></div>}
+    {loading && !current && !hasNext ? <div className="recommendation-loading" role="status"><Loader2 className="spin" size={24} /><strong>正在挑选下一条灵感</strong></div> :
+      current || hasNext ? <div className="discovery-layout">
+        <div className="discovery-stage">{current ? <>
+          <DiscoveryCard key={current.id} item={current} reason={data.reasons[current.id]} disabled={disabled || loading} onFeedback={onFeedback} onOpen={onOpen} />
+          <p className="swipe-help"><ArrowLeft size={14} />左划不感兴趣<span>·</span>右划感兴趣<ArrowRight size={14} /><span className="desktop-only">也可以聚焦卡片后使用 ← / →</span></p>
+          <div className="recommendation-live" role="status" aria-live="polite">{disabled ? "正在保存选择，请稍候" : `当前推荐：${current.name}`}</div>
+        </> : <div className="empty-state recommendation-empty" role="status"><Compass size={34} /><h2>{error ? "下一条灵感暂时没有读取出来" : "暂时没有新的候选"}</h2></div>}</div>
+        <aside className="discovery-aside">
+          <div className="recommendation-explainer"><Sparkles size={20} /><h3>把好灵感留下来</h3><p>根据你的选择调整主题、产品类型与可识别来源的顺序，同时保留新方向。</p><div className="interest-explainer-row"><Heart size={16} /><span><strong>感兴趣</strong>加入收藏，便于分类与写备注</span></div><div className="interest-explainer-row"><X size={16} /><span><strong>不感兴趣</strong>移走这一条，自动补下一条</span></div><div className="interest-explainer-row"><RotateCcw size={16} /><span><strong>随时调整</strong>可以撤销，也能恢复已划走内容</span></div>{data.profile.positiveTopics.length > 0 && <div className="interest-topics"><span>最近留下的方向</span><div className="card-tags">{data.profile.positiveTopics.slice(0, 4).map(topic => <span key={topic}>{topic}</span>)}</div></div>}<small>已记录 {data.feedbackCount} 条阅读选择。一次划走不会屏蔽整个主题或作者。</small></div>
+          {hasNext && <div className="discovery-next"><h3>接下来还可以看看</h3>{next.map((item, index) => item ?
+            <button key={index} onClick={() => onOpen(item)}><span><strong>{item.name}</strong><small>{item.category}</small></span><ArrowUpRight size={15} /></button> :
+            <div className="discovery-next-empty" key={index}>{error ? "下一条暂时无法读取" : "暂无下一条"}</div>)}</div>}
+        </aside>
+      </div> :
+        !error ? <div className="empty-state recommendation-empty"><Check size={34} /><h2>这一轮灵感已看完</h2><p>已有资料中暂时没有未处理的推荐。每天采集更新后会继续补充，也可以恢复已划走的内容重新看看。</p><div><button className="button primary" onClick={onSaved}><Bookmark size={15} />查看留下的灵感</button><button className="button secondary" onClick={onManage}><EyeOff size={15} />管理已划走</button></div></div> : <div className="empty-state recommendation-empty"><CircleHelp size={34} /><h2>下一条灵感暂时没有读取出来</h2><p>你的收藏与已保存选择会保留。请稍后重试。</p></div>}
     {current && <DiscoveryChoices item={current} disabled={disabled || loading} onFeedback={onFeedback} mobile />}
   </section>;
 }

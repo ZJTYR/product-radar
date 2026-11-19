@@ -619,6 +619,8 @@ dialog{max-width:calc(100vw - 20px);max-height:calc(100dvh - 20px);border-radius
 .ai-feedback{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
 .ai-feedback .dismiss-button{font-size:11px;padding:4px 6px}
 .detail-links{flex-wrap:wrap}
+.detail-reading-actions{display:flex;align-items:center;gap:8px}
+.detail-links .detail-read-button{height:30px;padding:0 9px;font-size:12px;white-space:nowrap}
 .recommendation-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:17px}
 .recommendation-toolbar p{font-size:12px;color:#526154;line-height:1.7;margin-top:7px}
 .recommendation-toolbar .pill{display:inline-flex;align-items:center;gap:6px}
@@ -676,6 +678,8 @@ dialog{max-width:calc(100vw - 20px);max-height:calc(100dvh - 20px);border-radius
 .discovery-next>button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;padding:12px 15px;border-bottom:1px solid #e7ece4;color:#395641}
 .discovery-next>button:last-child{border:0}
 .discovery-next>button:hover{background:#f0f5eb}
+.discovery-next-empty{padding:13px 15px;min-height:57px;display:flex;align-items:center;border-bottom:1px solid #e7ece4;color:#526154;font-size:12px}
+.discovery-next-empty:last-child{border:0}
 .discovery-next strong{font-size:13px;font-weight:600;display:block}
 .discovery-next small{display:block;font-size:11px;color:#526154;margin-top:3px}
 .recommendation-loading{min-height:320px;display:flex;flex-direction:column;gap:15px;align-items:center;justify-content:center;color:#365a40;font-size:14px}
