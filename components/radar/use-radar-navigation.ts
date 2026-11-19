@@ -21,8 +21,8 @@ export function useRadarNavigation() {
     window.history[options.replace ? 'replaceState' : 'pushState'](state,'',`${window.location.pathname}${after}${window.location.hash}`);
     current.current=next; restore.current=scroll; setLocation(next);
   },[]);
-  const closeDetail=useCallback(()=>{
-    if(!current.current.item) return;
+  const closeDetail=useCallback((expectedItemId?: string)=>{
+    if(!current.current.item || expectedItemId && current.current.item!==expectedItemId) return;
     if(typeof window.history.state?.radar?.detailFrom === 'string') window.history.back();
     else navigate({item:'',annotation:''},{replace:true,scroll:window.history.state?.radar?.scroll ?? 0});
   },[navigate]);

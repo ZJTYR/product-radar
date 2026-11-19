@@ -1,20 +1,22 @@
 import type { FeedResponse, IntelItem } from './types.ts';
+import { expandProductIds, productKeys } from './product-identity.ts';
 
 export function shanghaiDay(value: Date | string | number = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
 }
 
-export function selectHomeFeatured(items: IntelItem[], editionIds: string[] | undefined, readIds: Set<string>, savedIds: Set<string>, dismissedIds: Set<string>) {
-  const candidates = items.filter(item => item.kind === 'product' && !readIds.has(item.id) && !savedIds.has(item.id) && !dismissedIds.has(item.id));
+export function selectHomeFeatured(items: IntelItem[], editionIds: string[] | undefined, readIds: ReadonlySet<string>, savedIds: ReadonlySet<string>, dismissedIds: ReadonlySet<string>, reservedIds: readonly string[] = []) {
+  const excluded = expandProductIds(productKeys(items), [...readIds, ...reservedIds]);
+  const candidates = items.filter(item => item.kind === 'product' && !excluded.has(item.id) && !savedIds.has(item.id) && !dismissedIds.has(item.id));
   const edition = candidates.filter(item => !editionIds || editionIds.includes(item.id));
   if (edition.length) return edition.find(item => item.featured) || edition[0];
   // Star 核对会改变资料库排序；补位按真实收录时间选择，避免把旧资料当作今日采集。
   return [...candidates].sort((left, right) => Date.parse(right.discoveredAt) - Date.parse(left.discoveredAt) || left.id.localeCompare(right.id))[0] || null;
 }
 
-export function resolveHomeFeatured(current: IntelItem | null, sameSession: boolean, items: IntelItem[], editionIds: string[] | undefined, readIds: Set<string>, savedIds: Set<string>, dismissedIds: Set<string>) {
+export function resolveHomeFeatured(current: IntelItem | null, sameSession: boolean, items: IntelItem[], editionIds: string[] | undefined, readIds: ReadonlySet<string>, savedIds: ReadonlySet<string>, dismissedIds: ReadonlySet<string>, reservedIds?: readonly string[]) {
   if (sameSession && current && !dismissedIds.has(current.id)) return current;
-  return selectHomeFeatured(items, editionIds, readIds, savedIds, dismissedIds);
+  return selectHomeFeatured(items, editionIds, readIds, savedIds, dismissedIds, reservedIds);
 }
 
 export function editionAvailability(today: string, latestDate: string) {

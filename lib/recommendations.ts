@@ -1,5 +1,6 @@
 import type { IntelItem, ItemFeedback, ItemRead, SavedItem } from './types.ts';
 import { FRONTIER_LIMIT, frontierEventTime, frontierLabel, isRecentFrontierItem, selectFrontierItems } from './frontier.ts';
+import { expandProductIds, productKeys } from './product-identity.ts';
 export type RecommendationScope='all'|'products'|'github'|'ai'|'frontier';
 export interface RecommendationOptions {scope?:RecommendationScope;excludeIds?:string[];readItems?:ItemRead[]}
 type Feature={key:string;label:string;weight:number;topic:boolean};
@@ -26,7 +27,9 @@ export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorit
   return {...result,reasons:Object.fromEntries(result.items.map(item=>[item.id,`${isRecentFrontierItem(item,at)?'近期动态':'往期精选'} · ${frontierLabel(item)}${readIds.has(item.id)?' · 已读回看':''}`])),feedbackCount:feedback.length,profile:{positiveTopics:[],negativeTopics:[]}};
  }
  const byId=new Map(items.map(item=>[item.id,item]));const choices=new Map(feedback.map(entry=>[entry.itemId,entry.action]));
- const scope=options.scope||'all';const excluded=new Set([...(options.excludeIds||[]),...(options.readItems||[]).map(entry=>entry.itemId)]);
+ const scope=options.scope||'all';
+ const keys=productKeys(items);
+ const excluded=expandProductIds(keys,[...(options.excludeIds||[]),...(options.readItems||[]).map(entry=>entry.itemId)]);
  const saved=new Set(favorites.map(entry=>entry.itemId));const weights=new Map<string,number>();const labels=new Map<string,string>();
  const signals=new Map<string,number>(favorites.map(entry=>[entry.itemId,2]));
  for(const entry of feedback)signals.set(entry.itemId,entry.action==='interested'?3:-2);
@@ -35,7 +38,7 @@ export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorit
  }}
  for(const [key,value] of weights)weights.set(key,Math.max(-8,Math.min(8,value)));
  const eventTime=frontierEventTime;
- const candidates=[...byId.values()].filter(item=>{
+ const ranked=[...byId.values()].filter(item=>{
   if(choices.has(item.id)||saved.has(item.id)||excluded.has(item.id))return false;
   if(scope==='products')return item.kind==='product';
   if(scope==='github')return item.kind==='product'&&Boolean(item.github)&&item.stars!=null&&item.stars>0;
@@ -46,6 +49,14 @@ export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorit
   const affinity=features.reduce((total,feature)=>total+(weights.get(feature.key)||0)*feature.weight,0);
   return {item,features,score:affinity+(Number.isFinite(age)?1/(1+age/14):0)};
  }).sort((a,b)=>(scope==='ai'?eventTime(b.item)-eventTime(a.item):b.score-a.score)||b.item.discoveredAt.localeCompare(a.item.discoveredAt)||a.item.id.localeCompare(b.item.id));
+ const included=new Set<string>();
+ const candidates=ranked.filter(({item})=>{
+  const key=keys.get(item.id);
+  if (!key) return true;
+  if (included.has(key)) return false;
+  included.add(key);
+  return true;
+ });
  const remaining=candidates.length;const result:IntelItem[]=[];const reasons:Record<string,string>={};
  const recentCategories=feedback.slice(0,3).map(entry=>byId.get(entry.itemId)?.category).filter((value):value is string=>Boolean(value));
  while(candidates.length&&result.length<limit){let index=0;let exploring=false;
