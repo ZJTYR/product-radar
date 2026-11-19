@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { recommendItems } from '../lib/recommendations.ts';
-import { frontierEventTime, recentFrontierItems } from '../lib/frontier.ts';
+import { fillConfirmedFrontierSlots, frontierEventTime, recentFrontierItems } from '../lib/frontier.ts';
 import { itemSchema, catalogSchema } from '../lib/validation.ts';
 import { itemSchema as collectorItemSchema } from '../collector-site/lib/validation.ts';
 import { seedItems } from '../lib/seed.ts';
@@ -28,6 +28,32 @@ test('reading or saving every frontier item keeps recent coverage; explicit dism
   assert.equal(result.items.length, 6);
   assert.ok(result.items.some(item => item.id === 'ai-1'));
   assert.ok(!result.items.some(item => item.id === 'ai-0' || item.id === 'ai-7'));
+});
+
+test('the frontier excludes manually confirmed reads while preserving independent news and ordinary read fallbacks', () => {
+  const original = item('product-release', { newsTopic: 'product' });
+  const nextEvent = item('new-product-release', { newsTopic: 'product', website: original.website });
+  const recentlyOpened = ai('opened-ai');
+  const checked = '2026-10-28T00:00:00Z';
+  const readItems = [{ itemId: original.id, readAt: checked, confirmedAt: checked }, { itemId: recentlyOpened.id, readAt: checked }];
+  const result = recommend([original, nextEvent, recentlyOpened], { readItems }, [], [{ itemId: original.id }]);
+  assert.deepEqual(result.items.map(item => item.id), [nextEvent.id, recentlyOpened.id]);
+  assert.match(result.reasons[recentlyOpened.id], /已读回看/);
+});
+
+test('confirming an already replaced slot keeps its neighbors in place and represents exhaustion', () => {
+  const original = ai('original');
+  const neighbor = item('neighbor', { newsTopic: 'product' });
+  const next = ai('replacement');
+  const later = item('another-release');
+  const items = [original, neighbor, next, later];
+  const slots = [original, neighbor];
+  const read = new Set([original.id]);
+  const first = fillConfirmedFrontierSlots(slots, items, at, read, read, new Set());
+  assert.deepEqual(first, [next, neighbor]);
+  const both = new Set([original.id, next.id]);
+  assert.deepEqual(fillConfirmedFrontierSlots(first, items, at, both, both, new Set()), [later, neighbor]);
+  assert.deepEqual(fillConfirmedFrontierSlots(first, items, at, both, both, new Set([later.id])), [null, neighbor]);
 });
 
 test('no AI candidates still yields six genuine technology and product events, without treating product profiles as news', () => {

@@ -26,7 +26,7 @@ export interface SavedItem { itemId: string; collection: string; note: string; c
 export interface Preferences { email: string; deliveryTime: string; emailEnabled: boolean }
 export type InterestAction = 'interested' | 'not_interested';
 export interface ItemFeedback { itemId: string; action: InterestAction; updatedAt: string }
-export interface ItemRead { itemId: string; readAt: string }
+export interface ItemRead { itemId: string; readAt: string; confirmedAt?: string | null }
 export interface HistoryDay { date: string; count: number; updatedAt: string; status: string; readAt: string | null; hasUpdates: boolean }
 export interface FeedFreshness {
  today: string; checkedAt: string; latestEditionDate: string; latestEditionUpdatedAt: string; latestEditionStatus: string;

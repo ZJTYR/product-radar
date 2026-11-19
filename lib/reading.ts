@@ -5,14 +5,26 @@ export class ReadingRecordMissing extends Error {}
 export class ReadingVersionConflict extends Error {}
 
 export async function itemReadingState(db: RadarDatabase, userId: string) {
- const rows = await db.prepare('SELECT item_id as "itemId",read_at as "readAt" FROM reading_items WHERE user_id=? ORDER BY read_at DESC,item_id').bind(userId).all<ItemRead>();
+ const rows = await db.prepare(`
+  SELECT r.item_id AS "itemId", r.read_at AS "readAt", c.confirmed_at AS "confirmedAt"
+  FROM reading_items r
+  LEFT JOIN item_read_confirmations c ON c.user_id=r.user_id AND c.item_id=r.item_id
+  WHERE r.user_id=?
+  ORDER BY r.read_at DESC,r.item_id
+ `).bind(userId).all<ItemRead>();
  return { items: rows.results };
 }
 
-export async function recordItemRead(db: RadarDatabase, userId: string, itemId: string) {
+export async function recordItemRead(db: RadarDatabase, userId: string, itemId: string, confirm = false) {
  if (!await db.prepare('SELECT id FROM intel_items WHERE id=?').bind(itemId).first()) throw new ReadingRecordMissing('找不到该内容');
- // 已看是中性记录，不修改反馈、收藏或兴趣权重；重复打开保留首次阅读时间。
- await db.prepare('INSERT INTO reading_items(user_id,item_id,read_at) VALUES(?,?,?) ON CONFLICT(user_id,item_id) DO NOTHING').bind(userId,itemId,new Date().toISOString()).run();
+ const at = new Date().toISOString();
+ const read = db.prepare('INSERT INTO reading_items(user_id,item_id,read_at) VALUES(?,?,?) ON CONFLICT(user_id,item_id) DO NOTHING').bind(userId,itemId,at);
+ if (confirm) {
+  const confirmation = db.prepare('INSERT INTO item_read_confirmations(user_id,item_id,confirmed_at) VALUES(?,?,?) ON CONFLICT(user_id,item_id) DO NOTHING').bind(userId,itemId,at);
+  await db.batch([read, confirmation]);
+ } else {
+  await read.run();
+ }
  return itemReadingState(db,userId);
 }
 
