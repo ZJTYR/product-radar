@@ -56,6 +56,23 @@ test('opening a product persists a neutral read across sessions without changing
  }finally{reopened.close();}
 }));
 
+test('confirming read is durable and idempotent, including for old opened records and after an ordinary read', async()=>fixture(async(db,path)=>{
+ const [opened] = (await recordItemRead(db,'owner','ai-new')).items;
+ assert.equal(opened.confirmedAt,null);
+ const [confirmed] = (await recordItemRead(db,'owner','ai-new',true)).items;
+ assert.equal(confirmed.readAt,opened.readAt);
+ assert.ok(confirmed.confirmedAt);
+ const checkpoint = await recordItemRead(db,'owner','design',true);
+ assert.ok(checkpoint.items.find(item=>item.itemId==='design')?.confirmedAt);
+ const reopened = new RadarDatabase(undefined,path);
+ try {
+  await Promise.all([recordItemRead(reopened,'owner','ai-new',true),recordItemRead(db,'owner','ai-new')]);
+  assert.deepEqual(await itemReadingState(reopened,'owner'),checkpoint);
+  assert.deepEqual(await itemReadingState(reopened,'other'),{items:[]});
+  assert.deepEqual(await readingState(reopened,'owner'),{feedback:[],favorites:[]});
+ } finally { reopened.close(); }
+}));
+
 test('edition reading tracks the version actually opened, remains separate from product reads, and supports unread',async()=>fixture(async db=>{
  const read=await setEditionRead(db,'owner','2026-10-26',true,version);
  assert.ok(read.days[0].readAt);assert.equal(read.days[0].hasUpdates,false);assert.equal(read.days[0].count,2);
@@ -115,6 +132,8 @@ test('AI frontier requires an explicit application layer tag and retains dated h
 test('reading and candidate input reject forged owners, malformed versions, unknown scopes and excessive exclusions',()=>{
  assert.equal(itemReadSchema.safeParse({itemId:'tool-one',userId:'other'}).success,false);
  assert.equal(itemReadSchema.safeParse({itemId:'../bad'}).success,false);
+ assert.equal(itemReadSchema.safeParse({itemId:'tool-one',confirm:'true'}).success,false);
+ assert.equal(itemReadSchema.safeParse({itemId:'tool-one',confirm:true}).success,true);
  assert.equal(editionReadSchema.safeParse({date:'2026-10-26',read:true}).success,false);
  assert.equal(editionReadSchema.safeParse({date:'2026-02-30',read:false}).success,false);
  assert.equal(editionReadSchema.safeParse({date:'2026-10-26',read:true,version:'not-a-date'}).success,false);

@@ -44,7 +44,7 @@ export const undoSchema = z.object({ undoToken: z.string().uuid() }).strict();
 export const recommendationLimitSchema = z.coerce.number().int().min(1).max(30).default(12);
 export const recommendationScopeSchema = z.enum(['all', 'products', 'github', 'ai', 'frontier']).default('all');
 export const recommendationExcludeSchema = z.string().max(5049).default('').transform(value => value ? value.split(',') : []).pipe(z.array(feedbackItemIdSchema).max(50)).transform(value => [...new Set(value)]);
-export const itemReadSchema = z.object({ itemId: feedbackItemIdSchema }).strict();
+export const itemReadSchema = z.object({ itemId: feedbackItemIdSchema, confirm: z.boolean().optional() }).strict();
 export const editionReadSchema = z.object({ date: dateSchema, read: z.boolean(), version: timestamp.optional() }).strict().superRefine((value, ctx) => {
  if (value.read && !value.version) ctx.addIssue({ code: 'custom', path: ['version'], message: '标记已读须提供实际打开的简报版本' });
 });

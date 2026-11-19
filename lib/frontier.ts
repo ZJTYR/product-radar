@@ -42,11 +42,23 @@ export function recentFrontierItems(items: IntelItem[], at: number) {
   return frontierItems(items, at).filter(item => isRecentFrontierItem(item, at));
 }
 
-export function selectFrontierItems(items: IntelItem[], at: number, readIds: Set<string>, blockedIds: Set<string>, limit = FRONTIER_LIMIT) {
+export function selectFrontierItems(items: IntelItem[], at: number, readIds: ReadonlySet<string>, blockedIds: ReadonlySet<string>, limit = FRONTIER_LIMIT) {
   const candidates = frontierItems(items, at).filter(item => !blockedIds.has(item.id));
   candidates.sort((a, b) => Number(readIds.has(a.id)) - Number(readIds.has(b.id))
     || Number(isRecentFrontierItem(b, at)) - Number(isRecentFrontierItem(a, at))
     || topicOrder[frontierTopic(a)!] - topicOrder[frontierTopic(b)!]
     || frontierEventTime(b) - frontierEventTime(a) || a.id.localeCompare(b.id));
   return { items: candidates.slice(0, limit), remaining: candidates.length };
+}
+
+export function fillConfirmedFrontierSlots(
+  slots: (IntelItem | null)[], items: IntelItem[], at: number,
+  readIds: ReadonlySet<string>, confirmedIds: ReadonlySet<string>, dismissedIds: ReadonlySet<string>,
+) {
+  const isConfirmed = (item: IntelItem | null) => item !== null && confirmedIds.has(item.id);
+  const removedCount = slots.filter(isConfirmed).length;
+  if (!removedCount) return slots;
+  const reserved = new Set([...confirmedIds, ...dismissedIds, ...slots.flatMap(item => item ? [item.id] : [])]);
+  const candidates = selectFrontierItems(items, at, readIds, reserved, removedCount).items;
+  return slots.map(item => isConfirmed(item) ? candidates.shift() ?? null : item);
 }

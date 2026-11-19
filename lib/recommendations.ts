@@ -20,16 +20,21 @@ export function recommendationFeatures(item:IntelItem):Feature[] {
  return [...new Map(features.map(feature=>[feature.key,feature])).values()];
 }
 export function recommendItems(items:IntelItem[],feedback:ItemFeedback[],favorites:SavedItem[],limit=12,at=Date.now(),options:RecommendationOptions={}) {
+ const reads=options.readItems??[];
  if(options.scope==='frontier') {
-  const readIds=new Set((options.readItems||[]).map(entry=>entry.itemId));
-  const blockedIds=new Set([...(options.excludeIds||[]),...feedback.filter(entry=>entry.action==='not_interested').map(entry=>entry.itemId)]);
+  const readIds=new Set(reads.map(entry=>entry.itemId));
+  const blockedIds=new Set([
+   ...(options.excludeIds||[]),
+   ...feedback.filter(entry=>entry.action==='not_interested').map(entry=>entry.itemId),
+   ...reads.filter(entry=>entry.confirmedAt).map(entry=>entry.itemId),
+  ]);
   const result=selectFrontierItems(items,at,readIds,blockedIds,Math.min(limit,FRONTIER_LIMIT));
   return {...result,reasons:Object.fromEntries(result.items.map(item=>[item.id,`${isRecentFrontierItem(item,at)?'近期动态':'往期精选'} · ${frontierLabel(item)}${readIds.has(item.id)?' · 已读回看':''}`])),feedbackCount:feedback.length,profile:{positiveTopics:[],negativeTopics:[]}};
  }
  const byId=new Map(items.map(item=>[item.id,item]));const choices=new Map(feedback.map(entry=>[entry.itemId,entry.action]));
  const scope=options.scope||'all';
  const keys=productKeys(items);
- const excluded=expandProductIds(keys,[...(options.excludeIds||[]),...(options.readItems||[]).map(entry=>entry.itemId)]);
+ const excluded=expandProductIds(keys,[...(options.excludeIds||[]),...reads.map(entry=>entry.itemId)]);
  const saved=new Set(favorites.map(entry=>entry.itemId));const weights=new Map<string,number>();const labels=new Map<string,string>();
  const signals=new Map<string,number>(favorites.map(entry=>[entry.itemId,2]));
  for(const entry of feedback)signals.set(entry.itemId,entry.action==='interested'?3:-2);
