@@ -19,6 +19,13 @@ export function resolveHomeFeatured(current: IntelItem | null, sameSession: bool
   return selectHomeFeatured(items, editionIds, readIds, savedIds, dismissedIds, reservedIds);
 }
 
+export function fillHomeDesignSlots(items: readonly IntelItem[], slots: readonly (string | null)[], excludedIds: ReadonlySet<string>, replaceIds = excludedIds) {
+  const occupied = new Set(slots);
+  const candidates = items.filter(item => item.kind === 'design' && !occupied.has(item.id) && !excludedIds.has(item.id))
+    .sort((left, right) => Date.parse(right.discoveredAt) - Date.parse(left.discoveredAt) || left.id.localeCompare(right.id));
+  return slots.map(id => id && replaceIds.has(id) ? candidates.shift()?.id ?? null : id);
+}
+
 export function editionAvailability(today: string, latestDate: string) {
   if (!latestDate) return 'missing';
   if (latestDate > today) return 'future';

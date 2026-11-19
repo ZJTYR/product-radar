@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { RadarDatabase } from '../lib/database.ts';
 import { seedItems } from '../lib/seed.ts';
 import { readFeedMetadata } from '../lib/feed-metadata.ts';
-import { briefCheckMessage, editionAvailability, githubCheckMessage, latestEdition, readBriefUpdates, resolveHomeFeatured, selectHomeFeatured, shanghaiDay } from '../lib/home-feed.ts';
+import { briefCheckMessage, editionAvailability, fillHomeDesignSlots, githubCheckMessage, latestEdition, readBriefUpdates, resolveHomeFeatured, selectHomeFeatured, shanghaiDay } from '../lib/home-feed.ts';
 
 const item = (id, extra = {}) => ({ ...seedItems[0], id, name: id, kind: 'product', website: `https://example.com/${id}`, github: undefined, repo: undefined, featured: false, discoveredAt: '2026-10-25T00:00:00Z', ...extra });
 const catalog = [item('library-old'), item('edition'), item('pick', { featured: true }), item('library-new', { discoveredAt: '2026-10-26T00:00:00Z' }), item('design', { kind: 'design' }), item('ai', { kind: 'ai' })];
@@ -61,6 +61,18 @@ test('replacing the featured product skips read aliases and keeps other visible 
   const reserved = [gridCard.id];
   assert.equal(selectHomeFeatured(items, [alias.id, gridAlias.id], new Set([read.id]), empty(), empty(), reserved)?.id, available.id);
   assert.equal(resolveHomeFeatured(null, true, items.slice(0, -1), undefined, new Set([read.id]), empty(), empty(), reserved), null);
+});
+
+test('design read replacement preserves other slots and only fills from unread design entries', () => {
+  const article = (id, extra) => item(id, { kind: 'design', ...extra });
+  const items = [article('left'), article('right'), article('older'), article('latest', {
+    discoveredAt: '2026-10-27T00:00:00Z',
+  }), item('product')];
+  const slots = ['left', 'right'];
+  const read = new Set(['left', 'right']);
+  assert.deepEqual(fillHomeDesignSlots(items, slots, read, new Set(['left'])), ['latest', 'right']);
+  assert.deepEqual(fillHomeDesignSlots(items, slots, read), ['latest', 'older']);
+  assert.deepEqual(fillHomeDesignSlots(items, slots, new Set([...read, 'older', 'latest']), new Set(['left'])), [null, 'right']);
 });
 
 test('Shanghai calendar boundaries are independent of host timezone and distinguish missing, current and pending editions', () => {
